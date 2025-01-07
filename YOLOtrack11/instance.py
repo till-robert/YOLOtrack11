@@ -4,34 +4,11 @@ from ultralytics.utils.instance import Bboxes
 
 class Instances(ultralytics.utils.instance.Instances):
     def __init__(self, bboxes, segments=None, keypoints=None,z_positions=None, bbox_format="xywh", normalized=True) -> None:
-        """
-        Initialize the object with bounding boxes, segments, and keypoints.
 
-        Args:
-            bboxes (np.ndarray): Bounding boxes, shape [N, 4].
-            segments (list | np.ndarray, optional): Segmentation masks. Defaults to None.
-            keypoints (np.ndarray, optional): Keypoints, shape [N, 17, 3] and format (x, y, visible). Defaults to None.
-            bbox_format (str, optional): Format of bboxes. Defaults to "xywh".
-            normalized (bool, optional): Whether the coordinates are normalized. Defaults to True.
-        """
         super().__init__(bboxes,segments, keypoints,bbox_format=bbox_format, normalized=normalized)
         self.z_positions = z_positions
     def __getitem__(self, index) -> "Instances":
-        """
-        Retrieve a specific instance or a set of instances using indexing.
 
-        Args:
-            index (int, slice, or np.ndarray): The index, slice, or boolean array to select
-                                               the desired instances.
-
-        Returns:
-            Instances: A new Instances object containing the selected bounding boxes,
-                       segments, and keypoints if present.
-
-        Note:
-            When using boolean indexing, make sure to provide a boolean array with the same
-            length as the number of instances.
-        """
         segments = self.segments[index] if len(self.segments) else self.segments
         keypoints = self.keypoints[index] if self.keypoints is not None else None
         bboxes = self.bboxes[index]
@@ -57,22 +34,7 @@ class Instances(ultralytics.utils.instance.Instances):
             
     @classmethod
     def concatenate(cls, instances_list, axis=0):
-        """
-        Concatenates a list of Instances objects into a single Instances object.
 
-        Args:
-            instances_list (List[Instances]): A list of Instances objects to concatenate.
-            axis (int, optional): The axis along which the arrays will be concatenated. Defaults to 0.
-
-        Returns:
-            Instances: A new Instances object containing the concatenated bounding boxes,
-                       segments, and keypoints if present.
-
-        Note:
-            The `Instances` objects in the list should have the same properties, such as
-            the format of the bounding boxes, whether keypoints are present, and if the
-            coordinates are normalized.
-        """
         assert isinstance(instances_list, (list, tuple))
         if not instances_list:
             return cls(np.empty(0))

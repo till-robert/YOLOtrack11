@@ -158,19 +158,9 @@ def verify_image_label(args):
     return im_file, lb, shape, segments, keypoints,z_positions, nm, nf, ne, nc, msg
 
 class YOLOtrackDataset(YOLODataset):
-    """
-    Dataset class for loading object detection and/or segmentation labels in YOLO format.
 
-    Args:
-        data (dict, optional): A dataset YAML dictionary. Defaults to None.
-        task (str): An explicit arg to point current task, Defaults to 'detect'.
-
-    Returns:
-        (torch.utils.data.Dataset): A PyTorch dataset object that can be used for training an object detection model.
-    """
 
     def __init__(self, *args, task="zaxis", **kwargs):
-        """Initializes the YOLODataset with optional configurations for segments and keypoints."""
         self.use_zaxis = task == "zaxis"
         #print(task,data)
         super().__init__(*args, **kwargs)

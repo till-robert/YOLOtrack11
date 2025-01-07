@@ -13,18 +13,7 @@ from ultralytics.utils.torch_utils import de_parallel
 from .dataset import YOLOtrackDataset
 from .val import ZAxisValidator
 class ZAxisTrainer(yolo.detect.DetectionTrainer):
-    """
-    A class extending the DetectionTrainer class for training based on an Oriented Bounding Box (OBB) model.
 
-    Example:
-        ```python
-        from ultralytics.models.yolo.obb import OBBTrainer
-
-        args = dict(model="yolov8n-obb.pt", data="dota8.yaml", epochs=3)
-        trainer = OBBTrainer(overrides=args)
-        trainer.train()
-        ```
-    """
 
     def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks=None):
         """Initialize a ZAxisTrainer object with given arguments."""
