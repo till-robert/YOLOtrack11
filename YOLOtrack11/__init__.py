@@ -1,15 +1,17 @@
-__all__ = ["dataset", "loss", "model","val","predict","utils","results"]
+__all__ = ["dataset", "loss", "model","val","predict","utils","results", "instance"]
 
 
 import ultralytics
 from ultralytics.utils import yaml_load
 from pathlib import Path
 from .utils import imread
+from .instance import Instances
 
-# Patches:
+## Patches to original YOLO package
+
 ROOT = Path(__file__).resolve().parent #Patch root directory to point to local module folder
 ultralytics.utils.checks.ROOT = ROOT
-# Default configuration
+# set Default configuration
 DEFAULT_CFG_PATH = ROOT / "default.yaml"
 DEFAULT_CFG_DICT = yaml_load(DEFAULT_CFG_PATH)
 for k, v in DEFAULT_CFG_DICT.items():
@@ -23,7 +25,8 @@ get_cfg_old = ultralytics.cfg.get_cfg
 get_cfg = lambda cfg = DEFAULT_CFG_DICT, overrides= None: get_cfg_old(cfg, overrides)
 ultralytics.cfg.get_cfg = get_cfg
 ultralytics.engine.validator.get_cfg = get_cfg
-# ultralytics.utils.instance.Instance = Instances
+
+
 autobackend_base = ultralytics.nn.autobackend.AutoBackend
 class AutoBackend(autobackend_base):
     def warmup(self, imgsz=(1, 3, 640, 640)):
@@ -36,7 +39,10 @@ ultralytics.engine.predictor.AutoBackend = AutoBackend
 ultralytics.utils.patches.imread = imread
 ultralytics.data.loaders.imread = imread
 
-from .augment import Instances
+ultralytics.utils.instance.Instances = Instances
+
+
+
 from .model import ZAxisModel
 from .train import ZAxisTrainer
 from .val import ZAxisValidator
