@@ -19,29 +19,42 @@ from .utils import scale_img
 
 
 
-class ZAxis(Detect):
+class ZAxis(Pose):
     """YOLO ZAxis detection head for detection with 3D models."""
 
-    def __init__(self, nc=80, ne=1, ch=()):
+    def __init__(self, nc=80, num_extra_parameters=1, kpt_shape=(1,2), ch=()):
         """Initialize ZAxis with number of classes `nc` and layer channels `ch`."""
-        super().__init__(nc, ch)
-        self.ne = ne  # number of extra parameters
+        super().__init__(nc,kpt_shape, ch)
+        self.kpt_branch = self.cv4
+        self.ne = num_extra_parameters  # number of extra parameters
 
         c4 = max(ch[0] // 4, self.ne)
-        self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.ne, 1)) for x in ch)
+        self.z_branch = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.ne, 1)) for x in ch)
+
+
+        # self.kpt_shape = kpt_shape  # number of keypoints, number of dims (2 for x,y or 3 for x,y,visible)
+        # self.nk = kpt_shape[0] * kpt_shape[1]  # number of keypoints total
+
+        # c4 = max(ch[0] // 4, self.nk)
+        # self.kpt_branch = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.nk, 1)) for x in ch)
 
     def forward(self, x):
         """Concatenates and returns predicted bounding boxes and class probabilities."""
         bs = x[0].shape[0]  # batch size
-        z = torch.cat([self.cv4[i](x[i]).view(bs, self.ne, -1) for i in range(self.nl)], 2)  # z theta logits
+        z = torch.cat([self.z_branch[i](x[i]).view(bs, self.ne, -1) for i in range(self.nl)], 2)  # z theta logits
+        kpt = torch.cat([self.kpt_branch[i](x[i]).view(bs, self.nk, -1) for i in range(self.nl)], -1)  # (bs, 17*3, h*w)
+
+
         # NOTE: set `angle` as an attribute so that `decode_bboxes` could use it.
         z = z.sigmoid() # z = [0,1]
         if not self.training:
             self.z = z
         x = Detect.forward(self, x)
         if self.training:
-            return x, z
-        return torch.cat([x, z], 1) if self.export else (torch.cat([x[0], z], 1), (x[1], z))
+            return x, z, kpt
+        pred_kpt = self.kpts_decode(bs, kpt)
+
+        return torch.cat([x, z,pred_kpt], 1) if self.export else (torch.cat([x[0],z, pred_kpt], 1), (x[1],z, kpt))
 
     # def decode_bboxes(self, bboxes, anchors): not needed for for z-axis detection
     #     """Decode rotated bounding boxes."""
@@ -51,11 +64,17 @@ class ZAxis(Detect):
 class ZAxisModel(DetectionModel):
     """YOLOv8 Z-Axis model."""
 
-    def __init__(self, cfg="YOLOtrackv11.yaml", ch=1, nc=None, verbose=True):
+    def __init__(self, cfg="YOLOtrackv11.yaml", ch=1, nc=None, num_extra_parameters=1, kpt_shape=[], verbose=True):
         """Initialize YOLOv8 Z-Axis model with given config and parameters."""
 
         BaseModel.__init__(self)
         self.yaml = cfg if isinstance(cfg, dict) else yaml_model_load(cfg)  # cfg dict
+
+        if any(kpt_shape) and list(kpt_shape) != list(cfg["kpt_shape"]):
+            LOGGER.info(f"Overriding model.yaml kpt_shape={cfg['kpt_shape']} with kpt_shape={kpt_shape}")
+            cfg["kpt_shape"] = kpt_shape
+        cfg["num_extra_parameters"] = num_extra_parameters
+
         if self.yaml["backbone"][0][2] == "Silence":
             LOGGER.warning(
                 "WARNING ⚠️ YOLOv9 `Silence` module is deprecated in favor of nn.Identity. "
@@ -101,22 +120,22 @@ class ZAxisModel(DetectionModel):
         """Initialize the loss criterion for the model."""
         return v8ZAxisLoss(self)
     
-    def _predict_augment(self, x):
-        """Perform augmentations on input image x and return augmented inference and train outputs."""
-        if getattr(self, "end2end", False) or self.__class__.__name__ != "DetectionModel":
-            LOGGER.warning("WARNING ⚠️ Model does not support 'augment=True', reverting to single-scale prediction.")
-            return self._predict_once(x)
-        img_size = x.shape[-2:]  # height, width
-        s = [1, 0.83, 0.67]  # scales
-        f = [None, 3, None]  # flips (2-ud, 3-lr)
-        y = []  # outputs
-        for si, fi in zip(s, f):
-            xi = scale_img(x.flip(fi) if fi else x, si, gs=int(self.stride.max()))
-            yi = super().predict(xi)[0]  # forward
-            yi = self._descale_pred(yi, fi, si, img_size)
-            y.append(yi)
-        y = self._clip_augmented(y)  # clip augmented tails
-        return torch.cat(y, -1), None  # augmented inference, train
+    # def _predict_augment(self, x):
+    #     """Perform augmentations on input image x and return augmented inference and train outputs."""
+    #     if getattr(self, "end2end", False) or self.__class__.__name__ != "DetectionModel":
+    #         LOGGER.warning("WARNING ⚠️ Model does not support 'augment=True', reverting to single-scale prediction.")
+    #         return self._predict_once(x)
+    #     img_size = x.shape[-2:]  # height, width
+    #     s = [1, 0.83, 0.67]  # scales
+    #     f = [None, 3, None]  # flips (2-ud, 3-lr)
+    #     y = []  # outputs
+    #     for si, fi in zip(s, f):
+    #         xi = scale_img(x.flip(fi) if fi else x, si, gs=int(self.stride.max()))
+    #         yi = super().predict(xi)[0]  # forward
+    #         yi = self._descale_pred(yi, fi, si, img_size)
+    #         y.append(yi)
+    #     y = self._clip_augmented(y)  # clip augmented tails
+    #     return torch.cat(y, -1), None  # augmented inference, train
     
 def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
     """Parse a YOLO model.yaml dictionary into a PyTorch model."""
@@ -126,7 +145,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
     legacy = True  # backward compatibility for v3/v5/v8/v9 models
     max_channels = float("inf")
     nc, act, scales = (d.get(x) for x in ("nc", "activation", "scales"))
-    depth, width, kpt_shape = (d.get(x, 1.0) for x in ("depth_multiple", "width_multiple", "kpt_shape"))
+    depth, width, kpt_shape, num_extra_parameters = (d.get(x, 1.0) for x in ("depth_multiple", "width_multiple", "kpt_shape", "num_extra_parameters"))
     if scales:
         scale = d.get("scale")
         if not scale:

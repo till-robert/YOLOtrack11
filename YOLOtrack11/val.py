@@ -5,7 +5,7 @@ import json
 
 import torch
 
-from ultralytics.models.yolo.detect import DetectionValidator
+from ultralytics.models.yolo.pose import PoseValidator
 from ultralytics.utils import LOGGER, ops, callbacks, emojis,TQDM,colorstr
 from ultralytics.utils.metrics import batch_probiou,box_iou,Metric,ap_per_class,SimpleClass
 from ultralytics.utils.torch_utils import smart_inference_mode, select_device, de_parallel
@@ -22,7 +22,7 @@ from scipy.optimize import linear_sum_assignment
 from sklearn.metrics import r2_score,mean_squared_error
 
 
-class ZAxisValidator(DetectionValidator):
+class ZAxisValidator(PoseValidator):
     """
     A class extending the DetectionValidator class for validation based on an Oriented Bounding Box (OBB) model.
 
@@ -53,6 +53,7 @@ class ZAxisValidator(DetectionValidator):
         # self.stats["pred_z"] = []
         # self.stats["target_z"] = []
         self.stats["z_pairs"] = []
+        del self.stats["tp_p"]
         if(self.z_corr):
             self.downsampled_reference=self.downsampled_reference.to(self.device)
 
@@ -140,17 +141,26 @@ class ZAxisValidator(DetectionValidator):
         idx = batch["batch_idx"] == si
         cls = batch["cls"][idx].squeeze(-1)
         bbox = batch["bboxes"][idx]
-        z_position = batch["z"][idx].squeeze(-1)
+        extra_parameters = batch["extra_parameters"][idx]
         ori_shape = batch["ori_shape"][si]
         imgsz = batch["img"].shape[2:]
         ratio_pad = batch.pop("ratio_pad", None)
         ratio_pad = ratio_pad[si] if ratio_pad else ((1,1),(0,0))
+
+        kpts = batch["keypoints"][idx]
+        h, w = imgsz
+        kpts = kpts.clone()
+        kpts[..., 0] *= w
+        kpts[..., 1] *= h
+        kpts = ops.scale_coords(imgsz, kpts, ori_shape, ratio_pad=ratio_pad)
+
         if len(cls):
             bbox = ops.xywh2xyxy(bbox) * torch.tensor(imgsz, device=self.device)[[1, 0, 1, 0]]  # target boxes
             ops.scale_boxes(imgsz, bbox, ori_shape, ratio_pad=ratio_pad)  # native-space labels
-        return {"cls": cls, "bbox": bbox, "z": z_position,"ori_shape": ori_shape, "imgsz": imgsz, "ratio_pad": ratio_pad, "img":batch["img"][si]}
+        return {"cls": cls, "bbox": bbox, "extra_parameters": extra_parameters,"ori_shape": ori_shape, "imgsz": imgsz, "ratio_pad": ratio_pad, "img":batch["img"][si],"kpts": kpts}
 
     def update_metrics(self, preds, batch):
+        
         """Metrics."""
         for si, pred in enumerate(preds):
             self.seen += 1
@@ -160,9 +170,10 @@ class ZAxisValidator(DetectionValidator):
                 pred_cls=torch.zeros(0, device=self.device),
                 z_pairs=torch.zeros(len(batch["cls"]), self.niou,2, device=self.device),
                 tp=torch.zeros(npr, self.niou, dtype=torch.bool, device=self.device),
+                # tp_p=torch.zeros(npr, self.niou, dtype=torch.bool, device=self.device),
             )
             pbatch = self._prepare_batch(si, batch)
-            cls, bbox,gt_z = pbatch.pop("cls"), pbatch.pop("bbox"),pbatch.pop("z")
+            cls, bbox,gt_z = pbatch.pop("cls"), pbatch.pop("bbox"),pbatch.pop("extra_parameters").squeeze(-1)
             nl = len(cls)
             stat["target_cls"] = cls
             stat["target_img"] = cls.unique()
@@ -178,7 +189,7 @@ class ZAxisValidator(DetectionValidator):
             # Predictions
             if self.args.single_cls:
                 pred[:, 5] = 0
-            predn = self._prepare_pred(pred, pbatch)
+            predn, pred_kpts = self._prepare_pred(pred, pbatch)
             stat["conf"] = predn[:, 4]
             stat["pred_cls"] = predn[:, 5]
 
@@ -256,7 +267,7 @@ class ZAxisValidator(DetectionValidator):
 
     def plot_predictions(self, batch, preds, ni):
         """Plots predicted bounding boxes on input images and saves the result."""
-        batch_id, class_id, box,z, conf = output_to_z_target(preds, max_det=self.args.max_det)
+        batch_id, class_id, box,z, conf = output_to_z_target(preds[...,:7], max_det=self.args.max_det)
         plot_images( #TODO: use custom plotting function
             batch["img"],
             batch_id, class_id, box, conf,
@@ -277,7 +288,7 @@ class ZAxisValidator(DetectionValidator):
             fname=self.save_dir / f"val_batch{ni}_labels.jpg",
             names=self.names,
             on_plot=self.on_plot,
-            z=batch["z"]
+            z=batch["extra_parameters"].squeeze(-1)
 
         )
 
@@ -304,7 +315,7 @@ class ZAxisValidator(DetectionValidator):
             batch["img"] /= 2**16-1
         else:
             batch["img"] /= 255
-        for k in ["batch_idx", "cls", "bboxes","z"]:
+        for k in ["batch_idx", "cls", "bboxes","extra_parameters","keypoints"]:
             batch[k] = batch[k].to(self.device)
 
         if self.args.save_hybrid:

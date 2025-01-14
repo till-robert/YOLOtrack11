@@ -17,9 +17,11 @@ from ultralytics.utils import ops
 def plot_gt(path,ax):
     data=np.loadtxt(path.replace("images", "labels").replace("jpg","txt").replace("tif","txt")).T
     # print(data)
+    print(data.shape)
     cls = data[0]
-    bboxes = data[1:-1].T
-    z = data[-1]
+    bboxes = data[1:5].T
+    z = data[5]
+    x_p,y_p = data[6:]
     # print(bboxes)
     img = PIL.Image.open(path)
     ax.imshow(np.array(img),cmap="grey",vmin=0,vmax=2**16)
@@ -64,7 +66,8 @@ def box_iou(box1, box2, eps=1e-7):
 
 
 # reload(results)
-model = YOLOtrack11("../ultralytics/runs/zaxis/train163/weights/last.pt")
+model = YOLOtrack11("../ultralytics/runs/pose/train20/weights/last.pt")
+# model = YOLOtrack11("../ultralytics/runs/zaxis/train163/weights/last.pt")
 # print(model.model.model)
 print("loaded")
 dataset_path = "../ultralytics/data_gen/Dataset_hard/images/test"
