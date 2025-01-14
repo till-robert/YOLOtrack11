@@ -3,7 +3,7 @@
 import torch
 
 from .results import ZAxisResults as Results
-from ultralytics.models.yolo.detect.predict import DetectionPredictor
+from ultralytics.models.yolo.pose.predict import PosePredictor
 from ultralytics.utils import DEFAULT_CFG, ops
 from ultralytics.utils.checks import check_imgsz
 from ultralytics.data.augment import classify_transforms
@@ -12,7 +12,7 @@ from ultralytics.engine.predictor import STREAM_WARNING
 from .dataset import load_inference_source
 import numpy as np
 
-class ZAxisPredictor(DetectionPredictor):
+class ZAxisPredictor(PosePredictor):
     """
     A class extending the DetectionPredictor class for prediction based on an ZAxis model.
 
@@ -74,11 +74,11 @@ class ZAxisPredictor(DetectionPredictor):
         results = []
         for pred, orig_img, img_path in zip(preds, orig_imgs, self.batch[0]):
             pred[:, :4] = ops.scale_boxes(img.shape[2:], pred[:, :4], orig_img.shape)
-            # rboxes = ops.regularize_rboxes(torch.cat([pred[:, :4], pred[:, -1:]], dim=-1))
-            # rboxes[:, :4] = ops.scale_boxes(img.shape[2:], rboxes[:, :4], orig_img.shape, xywh=True)
-            # xywh, z, conf, clspred[:, :4] = ops.scale_boxes(img.shape[2:], pred[:, :4], orig_img.shape)
-            # zaxis = torch.cat([rboxes, pred[:, 4:6]], dim=-1)
-            results.append(Results(orig_img, path=img_path, names=self.model.names, zaxis=pred))
+            # nkpt = self.model.kpt_shape[0]
+            npar = self.model.model.num_extra_parameters
+            pred_kpts = pred[:, 6+npar:].view(len(pred), *self.model.kpt_shape) if len(pred) else pred[:, 6+npar:]
+            pred_kpts = ops.scale_coords(img.shape[2:], pred_kpts, orig_img.shape)
+            results.append(Results(orig_img, path=img_path, names=self.model.names, boxes=pred[:, :6], zaxis=pred[:, 6:6+npar], keypoints=pred_kpts))
         return results
     def setup_source(self, source):
         """Sets up source and inference mode."""

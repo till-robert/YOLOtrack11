@@ -151,7 +151,7 @@ class Format(ultralytics.data.augment.Format):
         labels["cls"] = torch.from_numpy(cls) if nl else torch.zeros(nl)
         #labels["z_pos"] = torch.from_numpy(z_position) if nl else torch.zeros(nl)
         labels["bboxes"] = torch.from_numpy(instances.bboxes) if nl else torch.zeros((nl, 4))
-        if self.return_keypoint:
+        if self.return_keypoint or self.return_zaxis:
             labels["keypoints"] = torch.from_numpy(instances.keypoints)
             if self.normalize:
                 labels["keypoints"][..., 0] /= w
@@ -161,7 +161,7 @@ class Format(ultralytics.data.augment.Format):
                 xyxyxyxy2xywhr(torch.from_numpy(instances.segments)) if len(instances.segments) else torch.zeros((0, 5))
             )
         if self.return_zaxis:
-            labels["z"] = torch.from_numpy(instances.z_positions)
+            labels["extra_parameters"] = torch.from_numpy(instances.extra_parameters)
         # NOTE: need to normalize obb in xywhr format for width-height consistency
         if self.normalize:
             labels["bboxes"][:, [0, 2]] /= w

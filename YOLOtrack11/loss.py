@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
-from ultralytics.utils.loss import v8DetectionLoss
+from ultralytics.utils.loss import v8PoseLoss
 from ultralytics.utils.tal import TaskAlignedAssigner,make_anchors
 from ultralytics.utils.ops import xywh2xyxy
 
-class v8ZAxisLoss(v8DetectionLoss):
+class v8ZAxisLoss(v8PoseLoss):
     """Calculates losses for object detection, classification, and box distribution in Zaxis YOLO models."""
 
     def __init__(self, model):
@@ -33,8 +33,8 @@ class v8ZAxisLoss(v8DetectionLoss):
         return out
     def __call__(self, preds, batch):
         """Calculate and return the loss for the YOLO model."""
-        loss = torch.zeros(4, device=self.device)  # box, cls, dfl
-        feats, pred_z = preds if isinstance(preds[0], list) else preds[1]
+        loss = torch.zeros(6, device=self.device)  # box, cls, dfl
+        feats, pred_z,pred_kpts = preds if isinstance(preds[0], list) else preds[1]
         pred_distri, pred_scores = torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2).split(
             (self.reg_max * 4, self.nc), 1
         )
@@ -42,6 +42,7 @@ class v8ZAxisLoss(v8DetectionLoss):
         pred_scores = pred_scores.permute(0, 2, 1).contiguous()
         pred_distri = pred_distri.permute(0, 2, 1).contiguous()
         pred_z = pred_z.permute(0, 2, 1).contiguous()
+        pred_kpts = pred_kpts.permute(0, 2, 1).contiguous()
 
         dtype = pred_scores.dtype
         batch_size = pred_scores.shape[0]
@@ -49,7 +50,8 @@ class v8ZAxisLoss(v8DetectionLoss):
         anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
 
         # Targets
-        targets = torch.cat((batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1), batch["bboxes"], batch["z"].view(-1,1)), 1)
+        batch_idx = batch["batch_idx"].view(-1, 1)
+        targets = torch.cat((batch_idx, batch["cls"].view(-1, 1), batch["bboxes"], batch["extra_parameters"].view(-1,1)), 1)
         targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
         gt_labels, gt_bboxes, gt_z = targets.split((1, 4,1), 2)  # cls, xyxyz
         mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0.0)
@@ -57,10 +59,12 @@ class v8ZAxisLoss(v8DetectionLoss):
         # target_z = batch["z"].to(self.device)
         # Pboxes
         pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyxy, (b, h*w, 4)
+        pred_kpts = self.kpts_decode(anchor_points, pred_kpts.view(batch_size, -1, *self.kpt_shape))  # (b, h*w, 17, 3)
+
         # dfl_conf = pred_distri.view(batch_size, -1, 4, self.reg_max).detach().softmax(-1)
         # dfl_conf = (dfl_conf.amax(-1).mean(-1) + dfl_conf.amax(-1).amin(-1)) / 2
 
-        _, target_bboxes, target_z,target_scores, fg_mask, _ = self.assigner(
+        _, target_bboxes, target_z,target_scores, fg_mask, target_gt_idx = self.assigner(
             # pred_scores.detach().sigmoid() * 0.8 + dfl_conf.unsqueeze(-1) * 0.2,
             pred_scores.detach().sigmoid(),
             (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
@@ -84,16 +88,29 @@ class v8ZAxisLoss(v8DetectionLoss):
             loss[0], loss[2] = self.bbox_loss(
                 pred_distri, pred_bboxes, anchor_points, target_bboxes, target_scores, target_scores_sum, fg_mask
             )
+            keypoints = batch["keypoints"].to(self.device).float().clone()
+            keypoints[..., 0] *= imgsz[1]
+            keypoints[..., 1] *= imgsz[0]
+
+            loss[4], loss[5] = self.calculate_keypoints_loss(
+                fg_mask, target_gt_idx, keypoints, batch_idx, stride_tensor, target_bboxes, pred_kpts
+            )
 
         #Z-Axis loss
         weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
         # loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
         loss[3] = (self.mse(pred_z[fg_mask],target_z[fg_mask])*weight).sum()/ (target_scores_sum)
 
+        # loss[4], loss[5] = self.calculate_keypoints_loss(
+        #         fg_mask, target_gt_idx, keypoints, batch_idx, stride_tensor, target_bboxes, pred_kpts
+        #     )
+
         loss[0] *= self.hyp.box  # box gain
         loss[1] *= self.hyp.cls  # cls gain
         loss[2] *= self.hyp.dfl  # dfl gain
         loss[3] *= self.hyp.z    # z gain
+        loss[4] *= self.hyp.pose  # pose gain
+        loss[5] *= self.hyp.kobj  # kobj gain
 
         return loss.sum() * batch_size, loss.detach() 
     

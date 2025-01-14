@@ -86,10 +86,10 @@ def load_inference_source(source=None, batch=1, vid_stride=1, buffer=False):
     return dataset
 def verify_image_label(args):
     """Verify one image-label pair."""
-    im_file, lb_file, prefix, keypoint,zaxis, num_cls, nkpt, ndim = args
+    im_file, lb_file, prefix, keypoint,zaxis, num_cls, nkpt, ndim, nparams = args
     #print(args)
     # Number (missing, found, empty, corrupt), message, segments, keypoints
-    nm, nf, ne, nc, msg, segments, keypoints, z_positions = 0, 0, 0, 0, "", [], None, None
+    nm, nf, ne, nc, msg, segments, keypoints, extra_parameters = 0, 0, 0, 0, "", [], None, None
 # try:
     # Verify images
     im = Image.open(im_file)
@@ -122,8 +122,10 @@ def verify_image_label(args):
                 points = lb[:, 5:].reshape(-1, ndim)[:, :2]
                 assert points.max() <= 1, f"non-normalized or out of bounds coordinates {points[points > 1]}"
             elif zaxis:
-                assert lb.shape[1] == (5 + 1), f"zaxis labels require 6 columns each "
-                z_positions = lb[:,5]
+                assert lb.shape[1] == (5 + nparams + nkpt*ndim), f"zaxis labels require {(5 + nparams + nkpt * ndim)} columns each "
+                extra_parameters = lb[:,5:5+nparams] #includes z, orientation,...
+                points = lb[:, 5+nparams:].reshape(-1, ndim)[:, :2]
+                assert points.max() <= 1, f"non-normalized or out of bounds coordinates {points[points > 1]}"
 
             else:
                 assert lb.shape[1] == 5, f"labels require 5 columns, {lb.shape[1]} columns detected"
@@ -154,8 +156,13 @@ def verify_image_label(args):
         if ndim == 2:
             kpt_mask = np.where((keypoints[..., 0] < 0) | (keypoints[..., 1] < 0), 0.0, 1.0).astype(np.float32)
             keypoints = np.concatenate([keypoints, kpt_mask[..., None]], axis=-1)  # (nl, nkpt, 3)
+    elif zaxis:
+        keypoints = lb[:, 5+nparams:].reshape(-1, nkpt, ndim)
+        if ndim == 2:
+            kpt_mask = np.where((keypoints[..., 0] < 0) | (keypoints[..., 1] < 0), 0.0, 1.0).astype(np.float32)
+            keypoints = np.concatenate([keypoints, kpt_mask[..., None]], axis=-1)  # (nl, nkpt, 3)
     lb = lb[:, :5]
-    return im_file, lb, shape, segments, keypoints,z_positions, nm, nf, ne, nc, msg
+    return im_file, lb, shape, segments, keypoints,extra_parameters, nm, nf, ne, nc, msg
 
 class YOLOtrackDataset(YOLODataset):
 
@@ -180,7 +187,8 @@ class YOLOtrackDataset(YOLODataset):
         desc = f"{self.prefix}Scanning {path.parent / path.stem}..."
         total = len(self.im_files)
         nkpt, ndim = self.data.get("kpt_shape", (0, 0))
-        if self.use_keypoints and (nkpt <= 0 or ndim not in {2, 3}):
+        n_extra_parameters = self.data.get("num_extra_parameters", 1)
+        if (self.use_keypoints or self.use_zaxis) and (nkpt <= 0 or ndim not in {2, 3}):
             raise ValueError(
                 "'kpt_shape' in data.yaml missing or incorrect. Should be a list with [number of "
                 "keypoints, number of dims (2 for x,y or 3 for x,y,visible)], i.e. 'kpt_shape: [17, 3]'"
@@ -197,10 +205,11 @@ class YOLOtrackDataset(YOLODataset):
                     repeat(len(self.data["names"])),
                     repeat(nkpt),
                     repeat(ndim),
+                    repeat(n_extra_parameters),
                 ),
             )
             pbar = TQDM(results, desc=desc, total=total)
-            for im_file, lb, shape, segments, keypoint,z_position, nm_f, nf_f, ne_f, nc_f, msg in pbar:
+            for im_file, lb, shape, segments, keypoint,extra_parameters, nm_f, nf_f, ne_f, nc_f, msg in pbar:
                 nm += nm_f
                 nf += nf_f
                 ne += ne_f
@@ -214,7 +223,7 @@ class YOLOtrackDataset(YOLODataset):
                             "bboxes": lb[:, 1:],  # n, 4
                             "segments": segments,
                             "keypoints": keypoint,
-                            "z": z_position,
+                            "extra_parameters": extra_parameters,
                             "normalized": True,
                             "bbox_format": "xywh",
                         }
@@ -268,15 +277,9 @@ class YOLOtrackDataset(YOLODataset):
         self.transforms = self.build_transforms(hyp)
 
     def update_labels_info(self, label):
-        """
-        Custom your label format here.
 
-        Note:
-            cls is not with bboxes now, classification and semantic segmentation need an independent cls label
-            Can also support classification and semantic segmentation by adding or removing dict keys there.
-        """
         bboxes = label.pop("bboxes")
-        z_positions = label.pop("z",None)
+        extra_parameters = label.pop("extra_parameters",None)
         segments = label.pop("segments", [])
         keypoints = label.pop("keypoints", None)
         bbox_format = label.pop("bbox_format")
@@ -291,7 +294,7 @@ class YOLOtrackDataset(YOLODataset):
         else:
             segments = np.zeros((0, segment_resamples, 2), dtype=np.float32)
         
-        label["instances"] = Instances(bboxes, segments, keypoints,z_positions, bbox_format=bbox_format, normalized=normalized)
+        label["instances"] = Instances(bboxes, segments, keypoints,extra_parameters, bbox_format=bbox_format, normalized=normalized)
         return label
 
     @staticmethod
@@ -304,7 +307,7 @@ class YOLOtrackDataset(YOLODataset):
             value = values[i]
             if k == "img":
                 value = torch.stack(value, 0)
-            if k in {"masks", "keypoints", "bboxes", "cls","z", "segments", "obb"}:
+            if k in {"masks", "keypoints", "bboxes", "cls","extra_parameters", "segments", "obb"}:
                 value = torch.cat(value, 0)
             new_batch[k] = value
         new_batch["batch_idx"] = list(new_batch["batch_idx"])
@@ -360,7 +363,7 @@ class YOLOtrackDataset(YOLODataset):
                 bboxes = self.labels[i]["bboxes"]
                 segments = self.labels[i]["segments"]
                 keypoints = self.labels[i]["keypoints"]
-                z_positions = self.labels[i]["z"]
+                extra_parameters = self.labels[i]["extra_parameters"]
                 j = (cls == include_class_array).any(1)
                 self.labels[i]["cls"] = cls[j]
                 self.labels[i]["bboxes"] = bboxes[j]
@@ -368,7 +371,7 @@ class YOLOtrackDataset(YOLODataset):
                     self.labels[i]["segments"] = [segments[si] for si, idx in enumerate(j) if idx]
                 if keypoints is not None:
                     self.labels[i]["keypoints"] = keypoints[j]
-                if z_positions is not None:
-                    self.labels[i]["z"] = z_positions[j]
+                if extra_parameters is not None:
+                    self.labels[i]["extra_parameters"] = extra_parameters[j]
             if self.single_cls:
                 self.labels[i]["cls"][:, 0] = 0
