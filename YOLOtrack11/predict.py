@@ -10,6 +10,7 @@ from ultralytics.data.augment import classify_transforms
 from ultralytics.utils import LOGGER
 from ultralytics.engine.predictor import STREAM_WARNING
 from .dataset import load_inference_source
+from .utils import scale_boxes, scale_coords
 import numpy as np
 
 class ZAxisPredictor(PosePredictor):
@@ -73,11 +74,11 @@ class ZAxisPredictor(PosePredictor):
 
         results = []
         for pred, orig_img, img_path in zip(preds, orig_imgs, self.batch[0]):
-            pred[:, :4] = ops.scale_boxes(img.shape[2:], pred[:, :4], orig_img.shape)
+            pred[:, :4] = scale_boxes(img.shape[2:], pred[:, :4], orig_img.shape)
             # nkpt = self.model.kpt_shape[0]
             npar = self.model.model.num_extra_parameters
             pred_kpts = pred[:, 6+npar:].view(len(pred), *self.model.kpt_shape) if len(pred) else pred[:, 6+npar:]
-            pred_kpts = ops.scale_coords(img.shape[2:], pred_kpts, orig_img.shape)
+            pred_kpts = scale_coords(img.shape[2:], pred_kpts, orig_img.shape)
             results.append(Results(orig_img, path=img_path, names=self.model.names, boxes=pred[:, :6], zaxis=pred[:, 6:6+npar], keypoints=pred_kpts))
         return results
     def setup_source(self, source):

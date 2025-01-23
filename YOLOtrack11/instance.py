@@ -54,3 +54,6 @@ class Instances(ultralytics.utils.instance.Instances):
         cat_extra_parameters = np.concatenate([b.extra_parameters for b in instances_list], axis=axis) if use_extra_pars else None
         assert len(cat_boxes) == len(cat_extra_parameters), "wrong length"
         return cls(cat_boxes, cat_segments, cat_keypoints, cat_extra_parameters,bbox_format, normalized)
+    def clip(self,w,h):
+        raise RuntimeError("clipping not allowed")
+        super().clip(w,h)

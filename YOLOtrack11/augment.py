@@ -46,7 +46,7 @@ class RandomPerspective(ultralytics.data.augment.RandomPerspective):
             keypoints = self.apply_keypoints(keypoints, M)
         new_instances = Instances(bboxes, segments, keypoints, z_positions,bbox_format="xyxy", normalized=False)
         # Clip
-        new_instances.clip(*self.size)
+        # new_instances.clip(*self.size)
 
         # Filter instances
         instances.scale(scale_w=scale, scale_h=scale, bbox_only=True)
