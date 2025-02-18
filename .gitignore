@@ -182,3 +182,5 @@ results_image*.jpg
 *.png
 YOLOtrack11/__pycache__/__init__.cpython-312.pyc
 ultralytics/
+*.npz
+*.npy
