@@ -128,4 +128,4 @@ cfg: # (str, optional) for overriding defaults.yaml
 tracker: botsort.yaml # (str) tracker type, choices=[botsort.yaml, bytetrack.yaml]
 
 z_corr: False
-physical_scale: [330,330,210] #field of view of data in x,y,z (in um) used in validation output
+physical_scale: [416, 351,210] #field of view of data in x,y,z (in um) used in validation output
