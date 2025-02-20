@@ -9,6 +9,6 @@ model = YOLOtrack11("../ultralytics/runs/pose/train23/weights/last.pt")
 # print(model.model.model)
 print("loaded")
 # results = model.train(data="data_gen/data.yaml", epochs=100, imgsz=512,)
-results = model.val()
+results = model.val(save=False,z_corr=False, physical_scale=[330,330,210], data='../ultralytics/data_gen/dataset0.yaml')
 
 print("test")

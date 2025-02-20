@@ -147,21 +147,24 @@ def verify_image_label(args):
                 msg = f"{prefix}WARNING ⚠️ {im_file}: {nl - len(i)} duplicate labels removed"
         else:
             ne = 1  # label empty
-            lb = np.zeros((0, (5 + nkpt * ndim) if keypoint else 5), dtype=np.float32)
+            lb = np.zeros((0, (5 + nkpt * ndim+nparams) if zaxis else 5), dtype=np.float32)
     else:
         nm = 1  # label missing
-        lb = np.zeros((0, (5 + nkpt * ndim) if keypoints else 5), dtype=np.float32)
+        lb = np.zeros((0, (5 + nkpt * ndim+nparams) if zaxis else 5), dtype=np.float32)
     if keypoint:
         keypoints = lb[:, 5:].reshape(-1, nkpt, ndim)
         if ndim == 2:
             kpt_mask = np.where((keypoints[..., 0] < 0) | (keypoints[..., 1] < 0), 0.0, 1.0).astype(np.float32)
             keypoints = np.concatenate([keypoints, kpt_mask[..., None]], axis=-1)  # (nl, nkpt, 3)
     elif zaxis:
+
         keypoints = lb[:, 5+nparams:].reshape(-1, nkpt, ndim)
+        extra_parameters = lb[:, 5:5+nparams]
         if ndim == 2:
             kpt_mask = np.where((keypoints[..., 0] < 0) | (keypoints[..., 1] < 0), 0.0, 1.0).astype(np.float32)
             keypoints = np.concatenate([keypoints, kpt_mask[..., None]], axis=-1)  # (nl, nkpt, 3)
     lb = lb[:, :5]
+
     return im_file, lb, shape, segments, keypoints,extra_parameters, nm, nf, ne, nc, msg
 
 class YOLOtrackDataset(YOLODataset):
@@ -279,7 +282,9 @@ class YOLOtrackDataset(YOLODataset):
     def update_labels_info(self, label):
 
         bboxes = label.pop("bboxes")
-        extra_parameters = label.pop("extra_parameters",None)
+        extra_parameters = label.pop("extra_parameters",[])
+        if(extra_parameters is None):
+            extra_parameters = np.empty(0)
         segments = label.pop("segments", [])
         keypoints = label.pop("keypoints", None)
         bbox_format = label.pop("bbox_format")

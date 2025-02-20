@@ -7,12 +7,16 @@ class Instances(ultralytics.utils.instance.Instances):
 
         super().__init__(bboxes,segments, keypoints,bbox_format=bbox_format, normalized=normalized)
         self.extra_parameters = extra_parameters
+
+        if(not isinstance(self.extra_parameters, np.ndarray)):
+            print("test")
+
     def __getitem__(self, index) -> "Instances":
 
         segments = self.segments[index] if len(self.segments) else self.segments
         keypoints = self.keypoints[index] if self.keypoints is not None else None
         bboxes = self.bboxes[index]
-        extra_parameters = self.extra_parameters[index] if self.extra_parameters is not None else None
+        extra_parameters = self.extra_parameters[index] if self.extra_parameters else None
         bbox_format = self._bboxes.format
         return Instances(
             bboxes=bboxes,

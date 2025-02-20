@@ -14,24 +14,7 @@ from scipy.optimize import linear_sum_assignment
 import torch
 from ultralytics.utils import ops
 
-def plot_gt(path,ax):
-    data=np.loadtxt(path.replace("images", "labels").replace("jpg","txt").replace("tif","txt")).T
-    # print(data)
-    print(data.shape)
-    cls = data[0]
-    bboxes = data[1:5].T
-    z = data[5]
-    x_p,y_p = data[6:]
-    # print(bboxes)
-    img = PIL.Image.open(path)
-    ax.imshow(np.array(img),cmap="grey",vmin=0,vmax=2**16)
-    ax.axis("off")
-    for bbox,z_value in zip(bboxes,z):
-        x,y,w,h = bbox*512
-        rect = Rectangle((x-0.5*w,y-0.5*h),h,w, linewidth=1, edgecolor="blue", facecolor='none')
-        ax.text(*rect.get_xy(),f"z={z_value:.3f}")
-        ax.add_patch(rect)
-    return bboxes,z
+ 
 
 
       

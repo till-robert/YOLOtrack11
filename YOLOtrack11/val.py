@@ -1,4 +1,4 @@
-# Ultralytics YOLO 🚀, AGPL-3.0 license
+        # Ultralytics YOLO 🚀, AGPL-3.0 license
 
 from pathlib import Path
 import json
@@ -17,7 +17,7 @@ from ultralytics.data.build import build_dataloader
 
 from .dataset import YOLOtrackDataset
 from .plotting import output_to_z_target, plot_images
-from .utils import scale_boxes, scale_coords
+from .utils import scale_boxes, scale_coords,scale_to_physical
 from ultralytics.nn.autobackend import AutoBackend
 import numpy as np
 from scipy.optimize import linear_sum_assignment
@@ -41,7 +41,8 @@ class ZAxisValidator(PoseValidator):
         super().__init__(dataloader, save_dir, pbar, args, _callbacks)
         self.args.task = "zaxis"
         self.metrics = ZAxisMetrics(save_dir=self.save_dir, plot=True, on_plot=self.on_plot)
-        self.z_corr = "z_corr" in args and args["z_corr"]
+        self.physical_scale = args["physical_scale"] if "physical_scale" in args else (1,1,1)
+        self.z_corr = args.get("z_corr", self.args.get("physical_scale", [1,1,1]))
         if(self.z_corr):
             self.downsampled_reference = torch.tensor(np.load("data_gen/ripples_downsampled.npy")/10000, device=self.device)-2
 
@@ -144,7 +145,7 @@ class ZAxisValidator(PoseValidator):
         idx = batch["batch_idx"] == si
         cls = batch["cls"][idx].squeeze(-1)
         bbox = batch["bboxes"][idx]
-        extra_parameters = batch["extra_parameters"][idx]
+        z = batch["extra_parameters"][idx]
         ori_shape = batch["ori_shape"][si]
         imgsz = batch["img"].shape[2:]
         ratio_pad = batch.pop("ratio_pad", None)
@@ -160,7 +161,7 @@ class ZAxisValidator(PoseValidator):
         if len(cls):
             bbox = ops.xywh2xyxy(bbox) * torch.tensor(imgsz, device=self.device)[[1, 0, 1, 0]]  # target boxes
             scale_boxes(imgsz, bbox, ori_shape, ratio_pad=ratio_pad)  # native-space labels
-        return {"cls": cls, "bbox": bbox, "extra_parameters": extra_parameters,"ori_shape": ori_shape, "imgsz": imgsz, "ratio_pad": ratio_pad, "img":batch["img"][si],"kpts": kpts}
+        return {"cls": cls, "bbox": bbox, "z": z,"ori_shape": ori_shape, "imgsz": imgsz, "ratio_pad": ratio_pad, "img":batch["img"][si],"kpts": kpts}
 
     def _prepare_pred(self, pred, pbatch):
         """Prepares and scales keypoints in a batch for pose processing."""
@@ -172,7 +173,7 @@ class ZAxisValidator(PoseValidator):
         pred_kpts = predn[:, 7:].view(len(predn), nk, -1)
         scale_coords(pbatch["imgsz"], pred_kpts, pbatch["ori_shape"], ratio_pad=pbatch["ratio_pad"])
         return predn, pred_kpts
-    
+
     def update_metrics(self, preds, batch):
         
         """Metrics."""
@@ -183,12 +184,12 @@ class ZAxisValidator(PoseValidator):
                 conf=torch.zeros(0, device=self.device),
                 pred_cls=torch.zeros(0, device=self.device),
                 z_pairs=torch.zeros(len(batch["cls"]), self.niou,2, device=self.device),
-                kpt_pairs=torch.zeros(len(batch["keypoints"]), self.niou,2,batch["keypoints"].shape[-1], device=self.device),
+                kpt_pairs=torch.zeros(len(batch["keypoints"]), self.niou,2,2, device=self.device),
                 tp=torch.zeros(npr, self.niou, dtype=torch.bool, device=self.device),
                 # tp_p=torch.zeros(npr, self.niou, dtype=torch.bool, device=self.device),
             )
             pbatch = self._prepare_batch(si, batch)
-            cls, bbox,gt_z,gt_kpts = pbatch.pop("cls"), pbatch.pop("bbox"),pbatch.pop("extra_parameters").squeeze(-1), pbatch.get("kpts")[...,:-1] #remove visibility from kpts
+            cls, bbox,gt_z,gt_kpts = pbatch.pop("cls"), pbatch.pop("bbox"),pbatch.pop("z").squeeze(-1), pbatch.get("kpts")[...,:-1] #remove visibility from kpts
             nl = len(cls)
             stat["target_cls"] = cls
             stat["target_img"] = cls.unique()
@@ -219,6 +220,8 @@ class ZAxisValidator(PoseValidator):
                 matched_kpt[~gt_pred_matcher.sum(axis=2).type(torch.bool)] = torch.nan #set unmatched detections to nan
                 stat["z_pairs"] = torch.cat([gt_z.expand((len(matched),-1)).unsqueeze(-1),matched.unsqueeze(-1)],2).transpose(0,1) #paired up z-values
                 stat["kpt_pairs"] = torch.cat([gt_kpts.transpose(0,1).expand((len(matched),-1,-1)).unsqueeze(-2),matched_kpt.unsqueeze(-2)],-2).transpose(0,1) #paired up kpt-values
+                stat["kpt_pairs"],stat["z_pairs"] = scale_to_physical(stat["kpt_pairs"],stat["z_pairs"], self.physical_scale, pbatch["ori_shape"])
+
                 #stat["z_pairs"] = [[pair for pair in row if not torch.any(torch.isnan(pair))] for row in z_pairs] #turn into list where nans are excluded
                 # stat["tp_z"] = self.
                 if self.args.plots:
@@ -348,7 +351,7 @@ class ZAxisValidator(PoseValidator):
         return batch
     def get_desc(self):
         """Return a formatted string summarizing class metrics of YOLO model."""
-        return ("%22s" + "%11s" * 8) % ("Class", "Images", "Instances", "Box(P", "R", "mAP50", "mAP50-95)","z MSE","xy MSE")
+        return ("%22s" + "%11s" * 8) % ("Class", "Images", "Instances", "Box(P", "R", "mAP50", "mAP50-95)","z rms.","xy rms.")
     
     def build_dataset(self, img_path, mode="val", batch=None):
         """
@@ -567,14 +570,14 @@ class ZAxisMetrics(SimpleClass):
     @property
     def keys(self):
         """Returns a list of keys for accessing specific metrics."""
-        return ["metrics/precision(B)", "metrics/recall(B)", "metrics/mAP50(B)", "metrics/mAP50-95(B)","metrics/Z-Axis MSE","metrics/xy-Axis MSE"]
+        return ["metrics/precision(B)", "metrics/recall(B)", "metrics/mAP50(B)", "metrics/mAP50-95(B)","metrics/Z-Axis rms.","metrics/xy-Axis rms."]
 
     def mean_results(self):
         """Calculate mean of detected objects & return precision, recall, mAP50, and mAP50-95."""
         results = self.box.mean_results()
         if self.z_pairs and self.kpt_pairs is not None:
-            results.append(self.z_mse[4])
-            results.append(self.xy_mse[4])
+            results.append(self.z_rms[4])
+            results.append(self.xy_rms[4])
         else:
             results.append(0)
             results.append(0)
@@ -614,34 +617,30 @@ class ZAxisMetrics(SimpleClass):
         """Returns dictionary of computed performance metrics and statistics."""
         return self.box.curves_results
     
-    @property
-    def z_r2(self):
-        """Return Z-Axis R2 for 10 different IoU values"""
-        return [r2_score(*z_pairs) for z_pairs in self.z_pairs] if self.z_pairs is not None else None
     
     @property
-    def z_mse(self):
-        """Return Z-Axis R2 for 10 different IoU values"""
-        msd = []
+    def z_rms(self):
+        """Return Z-Axis root mean square error [um] for 10 different IoU values"""
+        rms = []
         for z_pairs in self.z_pairs:
-            z_distance = (np.subtract(*z_pairs))*(1567*0.134)#um
-            msd.append((z_distance**2).mean())
-        return msd
+            z_distance = (np.subtract(*z_pairs))
+            rms.append(np.sqrt((z_distance**2).mean()))
+        return rms
     
     @property
-    def xy_mse(self):
-        """Return Z-Axis R2 for 10 different IoU values"""
+    def xy_rms(self):
+        """Return xy root mean square error [um] for 10 different IoU values"""
         distances = self.xy_distances
-        msd = [(distance**2).mean() for distance in distances]
-        return msd
+        rms = [np.sqrt((distance**2).mean()) for distance in distances]
+        return rms
     
     @property
     def xy_distances(self):
 
         distances = []
         for kpt_pairs in self.kpt_pairs:
-            x_distance = (np.subtract(*kpt_pairs[0]))*(4*0.161) #um
-            y_distance = (np.subtract(*kpt_pairs[1]))*(4*0.161)
+            x_distance = (np.subtract(*kpt_pairs[0]))
+            y_distance = (np.subtract(*kpt_pairs[1]))
             distance = np.sqrt(x_distance**2+y_distance**2)
 
             distances.append(distance)
