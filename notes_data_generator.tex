@@ -1,0 +1,46 @@
+\documentclass[
+  headings=standardclasses,
+  a4paper,
+  parskip=half,  % new paragraphs start with half line vertical space
+  cleardoublepage=plain,  % no header/footer on blank pages
+  DIV=11,
+  fontsize=10.5pt
+  ]{scrartcl}
+\input{header.tex}
+\title{Notes on Data Generator}
+\author{Till}
+
+\begin{document}
+    \maketitle
+    \begin{itemize}
+        \item Bead refstack
+        \begin{itemize}
+            \item Original images: monochrome $16 \,\text{bit}$ $512\times512 \,\text{px}$, with $0.161\,\upmu\mathrm{m}/\mathrm{px}$
+            \item Number of $z$ slices: $1568$, $0.134 \,\upmu\mathrm{m}$ spacing
+            \begin{itemize}
+                \item[$\rightarrow$] \textbf{Field of view} $(x_{\text{FOV}},y_{\text{FOV}},z_{\text{FOV}})=(82.4,82.4,210)\,\upmu\mathrm{m}$
+            \end{itemize}
+            \item Focus at $(x_0,y_0,z_0)=(259\,\text{px},256\,\text{px},761)$
+            \item Images are ...
+            \begin{itemize}
+                \item radially averaged
+                \item Downsampled by a factor of $\alpha=1/4$
+            \end{itemize} 
+            \item[$\rightarrow$]  Final (numpy) shape: $1568\times128\times128$, with $0.644\,\upmu\mathrm{m}/\mathrm{px}$
+        \end{itemize}
+        \item[]
+        \item Training Data Generator
+        \begin{itemize}
+            \item Bounding box width/height (set arbitrarily by eye)
+            \begin{align*}
+                bw = bh &= (0.21\cdot|z-z_0|+55) \cdot 0.161\,\upmu\mathrm{m} \\ &= (0.21\cdot|z-z_0|+55) \cdot \alpha \,\mathrm{px}
+            \end{align*}
+            \item (Downsampled) particles are placed on a background with a brightness of $\num{20000}$, with a size of ...\begin{itemize}
+                \item either $640\times540 \,\text{px}$, corresponding to a FOV of $(x_{\text{FOV}},y_{\text{FOV}})=(412, 348) \, \upmu\text{m}$
+                \item or (closer to Yundon's FOV) $646\times 545 \, \text{px}$, corresponding to a FOV of $(x_{\text{FOV}},y_{\text{FOV}})=(416,351) \, \upmu\text{m}$, with a subsequent resize to $640\times540 \,\text{px}$
+            \end{itemize}
+            \item this allows to use of input data of the format of Yundon's stacks ($1280\times1080\,\text{px}$) by simply downscaling the images by a factor of $1/2$.
+        \end{itemize}
+        \item Gaussian noise with $\sigma \approx 100$ is added on top of the images, roughly the same noise scale as Yundon's images
+    \end{itemize}
+\end{document}
