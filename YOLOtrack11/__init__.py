@@ -1,5 +1,18 @@
-__all__ = ["dataset", "loss", "model","val","predict","utils","results", "instance"]
+"""
+YOLOtrack11 Module
 
+This module extends the YOLO framework to include custom functionality for the "zaxis" task.
+It provides a modified model, trainer, validator, and predictors,
+as well as some patches to the original YOLO package.
+
+Classes:
+    YOLOtrack11: Custom YOLO class for the "zaxis" task.
+
+Modules:
+    dataset, loss, model, val, predict, utils, results, instance
+"""
+
+__all__ = ["dataset", "loss", "model", "val", "predict", "utils", "results", "instance"]
 
 import ultralytics
 from ultralytics.utils import yaml_load
@@ -7,11 +20,11 @@ from pathlib import Path
 from .utils import imread
 from .instance import Instances
 
-## Patches to original YOLO package
-
-ROOT = Path(__file__).resolve().parent #Patch root directory to point to local module folder
+# Patches to original YOLO package
+ROOT = Path(__file__).resolve().parent  # Patch root directory to point to local module folder
 ultralytics.utils.checks.ROOT = ROOT
-# set Default configuration
+
+# Set default configuration
 DEFAULT_CFG_PATH = ROOT / "default.yaml"
 DEFAULT_CFG_DICT = yaml_load(DEFAULT_CFG_PATH)
 for k, v in DEFAULT_CFG_DICT.items():
@@ -22,17 +35,27 @@ ultralytics.utils.DEFAULT_CFG_KEYS = DEFAULT_CFG_DICT.keys()
 ultralytics.utils.DEFAULT_CFG = ultralytics.utils.IterableSimpleNamespace(**DEFAULT_CFG_DICT)
 ultralytics.cfg.TASK2DATA["zaxis"] = ""
 get_cfg_old = ultralytics.cfg.get_cfg
-get_cfg = lambda cfg = DEFAULT_CFG_DICT, overrides= None: get_cfg_old(cfg, overrides)
+get_cfg = lambda cfg=DEFAULT_CFG_DICT, overrides=None: get_cfg_old(cfg, overrides)
 ultralytics.cfg.get_cfg = get_cfg
 ultralytics.engine.validator.get_cfg = get_cfg
 
-
+# Patch AutoBackend class
 autobackend_base = ultralytics.nn.autobackend.AutoBackend
 class AutoBackend(autobackend_base):
+    """
+    Custom AutoBackend class to modify the warmup behavior for the "zaxis" task.
+    """
     def warmup(self, imgsz=(1, 3, 640, 640)):
+        """
+        Adjusts the warmup image size for the "zaxis" task.
+
+        Args:
+            imgsz (tuple): Image size in the format (batch_size, channels, height, width).
+        """
         imgsz = list(imgsz)
-        imgsz[1] = 1
+        imgsz[1] = 1  # Set channels to 1 for "zaxis"
         super().warmup(imgsz)
+
 ultralytics.nn.autobackend.AutoBackend = AutoBackend
 ultralytics.engine.validator.AutoBackend = AutoBackend
 ultralytics.engine.predictor.AutoBackend = AutoBackend
@@ -40,8 +63,6 @@ ultralytics.utils.patches.imread = imread
 ultralytics.data.loaders.imread = imread
 
 ultralytics.utils.instance.Instances = Instances
-
-
 
 from .model import ZAxisModel
 from .train import ZAxisTrainer
@@ -51,11 +72,31 @@ from .predict import ZAxisPredictor
 from ultralytics.models.yolo import YOLO
 
 class YOLOtrack11(YOLO):
+    """
+    Custom YOLO class for the "zaxis" task.
+
+    This class extends the YOLO framework to include custom functionality for the "zaxis" task,
+    such as custom models, trainers, validators, and predictors.
+    """
     def __init__(self, model="yolo11n-zaxis.yaml", task="zaxis", verbose=False):
+        """
+        Initializes the YOLOtrack11 class.
+
+        Args:
+            model (str): Path to the model configuration file.
+            task (str): Task name (default is "zaxis").
+            verbose (bool): Whether to enable verbose logging.
+        """
         super().__init__(model, task, verbose)
+
     @property
     def task_map(self):
-        """Map head to model, trainer, validator, and predictor classes."""
+        """
+        Maps the task name to the corresponding model, trainer, validator, and predictor classes.
+
+        Returns:
+            dict: A dictionary mapping task names to their respective classes.
+        """
         return {
             "zaxis": {
                 "model": ZAxisModel,
@@ -64,15 +105,21 @@ class YOLOtrack11(YOLO):
                 "predictor": ZAxisPredictor,
             },
         }
-    
-    def val(
-        self,
-        validator=None,
-        **kwargs,
-    ):
 
-        custom = {}  # method defaults
-        args = {**self.overrides, **custom, **kwargs, "mode": "val"}  # highest priority args on the right
+    def val(self, validator=None, **kwargs):
+        """
+        Runs the validation process for the model.
+
+        Args:
+            validator (callable, optional): Custom validator class. If not provided, the default
+                validator for the task will be used.
+            **kwargs: Additional arguments to override default validation parameters.
+
+        Returns:
+            dict: Validation metrics.
+        """
+        custom = {}  # Method defaults
+        args = {**self.overrides, **custom, **kwargs, "mode": "val"}  # Highest priority args on the right
 
         validator = (validator or self._smart_load("validator"))(args=args, _callbacks=self.callbacks)
         validator(model=self.model)

@@ -100,11 +100,11 @@ def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None, normalize=False
         coords[..., 1] /= img0_shape[0]  # height
     return coords
 
-def scale_to_physical(kpts, z, physical_scale, orig_shape):
-    h, w, d = physical_scale
-    kpts = kpts.clone()
-    z = z.clone()
-    kpts[..., 0] *= w / orig_shape[0]
-    kpts[..., 1] *= h / orig_shape[1]
-    z *= d
-    return kpts,z
+# def scale_to_physical(kpts, z, physical_scale, orig_shape):
+#     h, w, d = physical_scale
+#     kpts = kpts.clone()
+#     z = z.clone()
+#     kpts[..., 0] *= w / orig_shape[0]
+#     kpts[..., 1] *= h / orig_shape[1]
+#     z *= d
+#     return kpts,z

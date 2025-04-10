@@ -251,7 +251,7 @@ class ZAxisTaskAlignedAssigner(TaskAlignedAssigner):
 
         pd_z = pd_z.unsqueeze(1).expand(-1, self.n_max_boxes, -1, -1)[mask_gt]
         gt_z = gt_z.unsqueeze(2).expand(-1, -1, na, -1)[mask_gt].type(torch.float16)
-        z_similarity[mask_gt] = (1 - torch.abs(pd_z - gt_z) / ((torch.max(gt_z) - torch.min(gt_z) + self.eps)*0+1)).squeeze().type(pd_z.dtype)
+        z_similarity[mask_gt] = (1 - torch.abs(pd_z - gt_z) / ((torch.max(gt_z) - torch.min(gt_z) + self.eps))).squeeze().type(pd_z.dtype)
 
         align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta) * z_similarity.pow(40)
         return align_metric, overlaps,z_similarity

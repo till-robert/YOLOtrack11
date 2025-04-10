@@ -17,7 +17,7 @@ from ultralytics.data.build import build_dataloader
 
 from .dataset import YOLOtrackDataset
 from .plotting import output_to_z_target, plot_images
-from .utils import scale_boxes, scale_coords,scale_to_physical
+from .utils import scale_boxes, scale_coords #,scale_to_physical
 from ultralytics.nn.autobackend import AutoBackend
 import numpy as np
 from scipy.optimize import linear_sum_assignment
@@ -160,18 +160,18 @@ class ZAxisValidator(PoseValidator):
 
         if len(cls):
             bbox = ops.xywh2xyxy(bbox) * torch.tensor(imgsz, device=self.device)[[1, 0, 1, 0]]  # target boxes
-            scale_boxes(imgsz, bbox, ori_shape, ratio_pad=ratio_pad)  # native-space labels
+            bbox = scale_boxes(imgsz, bbox, ori_shape, ratio_pad=ratio_pad)  # native-space labels
         return {"cls": cls, "bbox": bbox, "z": z,"ori_shape": ori_shape, "imgsz": imgsz, "ratio_pad": ratio_pad, "img":batch["img"][si],"kpts": kpts}
 
     def _prepare_pred(self, pred, pbatch):
         """Prepares and scales keypoints in a batch for pose processing."""
         predn = pred.clone()
-        scale_boxes(
+        predn[:, :4] = scale_boxes(
             pbatch["imgsz"], predn[:, :4], pbatch["ori_shape"], ratio_pad=pbatch["ratio_pad"]
         )  # native-space pred
         nk = pbatch["kpts"].shape[1]
         pred_kpts = predn[:, 7:].view(len(predn), nk, -1)
-        scale_coords(pbatch["imgsz"], pred_kpts, pbatch["ori_shape"], ratio_pad=pbatch["ratio_pad"])
+        pred_kpts = scale_coords(pbatch["imgsz"], pred_kpts, pbatch["ori_shape"], ratio_pad=pbatch["ratio_pad"])
         return predn, pred_kpts
 
     def update_metrics(self, preds, batch):
@@ -220,7 +220,7 @@ class ZAxisValidator(PoseValidator):
                 matched_kpt[~gt_pred_matcher.sum(axis=2).type(torch.bool)] = torch.nan #set unmatched detections to nan
                 stat["z_pairs"] = torch.cat([gt_z.expand((len(matched),-1)).unsqueeze(-1),matched.unsqueeze(-1)],2).transpose(0,1) #paired up z-values
                 stat["kpt_pairs"] = torch.cat([gt_kpts.transpose(0,1).expand((len(matched),-1,-1)).unsqueeze(-2),matched_kpt.unsqueeze(-2)],-2).transpose(0,1) #paired up kpt-values
-                stat["kpt_pairs"],stat["z_pairs"] = scale_to_physical(stat["kpt_pairs"],stat["z_pairs"], self.physical_scale, pbatch["ori_shape"])
+                #stat["kpt_pairs"],stat["z_pairs"] = scale_to_physical(stat["kpt_pairs"],stat["z_pairs"], self.physical_scale, pbatch["ori_shape"])
 
                 #stat["z_pairs"] = [[pair for pair in row if not torch.any(torch.isnan(pair))] for row in z_pairs] #turn into list where nans are excluded
                 # stat["tp_z"] = self.

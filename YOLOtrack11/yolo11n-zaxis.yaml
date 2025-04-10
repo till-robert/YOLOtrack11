@@ -1,8 +1,8 @@
-# Ultralytics YOLO 🚀, AGPL-3.0 license
+# Ultralytics YOLO 🚀, AGPL-3.0 licensem edited by till
 # YOLO11 ZAxis model with P3-P5 outputs.
 
 # Parameters
-nc: 80 # number of classes
+nc: 1 # number of classes
 kpt_shape: [1,2]
 num_extra_parameters: 1
 scales: # model compound scaling constants, i.e. 'model=yolo11n-zaxis.yaml' will call yolo11-zaxis.yaml with scale 'n'

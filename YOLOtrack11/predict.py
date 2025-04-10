@@ -80,7 +80,7 @@ class ZAxisPredictor(PosePredictor):
             npar = self.model.model.num_extra_parameters
             pred_kpts = pred[:, 6+npar:].view(len(pred), *self.model.kpt_shape) if len(pred) else pred[:, 6+npar:]
             pred_kpts = scale_coords(img.shape[2:], pred_kpts, orig_img.shape)
-            results.append(Results(orig_img, path=img_path, names=self.model.names, boxes=pred[:, :6], zaxis=pred[:, 6:6+npar], keypoints=pred_kpts, physical_scale=self.physical_scale))
+            results.append(Results(orig_img, path=img_path, names=self.model.names, boxes=pred[:, :6], zaxis=pred[:, 6:6+npar], keypoints=pred_kpts))
         return results
     def setup_source(self, source):
         """Sets up source and inference mode."""
