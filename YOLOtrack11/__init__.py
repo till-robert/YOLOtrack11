@@ -5,6 +5,7 @@ This module extends the YOLO framework to include custom functionality for the "
 It provides a modified model, trainer, validator, and predictors,
 as well as some patches to the original YOLO package.
 
+
 Classes:
     YOLOtrack11: Custom YOLO class for the "zaxis" task.
 

@@ -4,7 +4,7 @@
 # Parameters
 nc: 1 # number of classes
 kpt_shape: [1,2]
-num_extra_parameters: 1
+num_extra_parameters: 2
 scales: # model compound scaling constants, i.e. 'model=yolo11n-zaxis.yaml' will call yolo11-zaxis.yaml with scale 'n'
   # [depth, width, max_channels]
   n: [0.50, 0.25, 1024] # summary: 344 layers, 2695747 parameters, 2695731 gradients, 6.9 GFLOPs

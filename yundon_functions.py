@@ -15,8 +15,11 @@ def open_yundon_img(idx):
     if yundon_img[0] != i: #if correct image is not loaded:
         if isinstance(yundon_img[1], PIL.Image.Image): yundon_img[1].close() #close old image
         yundon_img = i,PIL.Image.open("../../Pictures/"+imgpaths[i])
+    try:
+        yundon_img[1].seek(idx)
+    except ValueError as e:
+        raise ValueError("seek error",idx, e)
 
-    yundon_img[1].seek(idx)
     return yundon_img[1]
 def gt_yundon(idx):
     x,y,z=np.loadtxt("../../Pictures/TrackingResultBugs_4th_TrackingGroundTruthScript250213.csv", delimiter=",").T
@@ -26,13 +29,14 @@ def gt_yundon(idx):
     z -= 0.2676 * idx
 
 
-    bx=by = (np.abs(z)/0.161*0.21+55)
-    bboxes = np.array([x,y,bx,by]).T
+    bx = (np.abs(z)/0.161*0.21+55)
+    by = (np.abs(z)/0.161*0.21+55)
+    bboxes = np.array([x,y,bx,by]).T    
     # z/=210 # convert to network scale
     mask = (z > -102) & (z < 108)
     # if(len(data)==0):
     #      return plot_result(ax,path, np.empty(0),np.empty((0,4)),np.empty(0),np.empty((0,0)))
     cls = np.zeros_like(x)
     
-    kpts = np.array([x,y]).T
-    return x[mask]/1280,y[mask]/1080,(-z[mask]+200)/400
+    kpts = np.array([x,y]).T    
+    return x[mask]/1280,y[mask]/1080,-z[mask]

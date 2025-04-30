@@ -53,6 +53,7 @@ class ZAxisValidator(PoseValidator):
         super().init_metrics(model)
         val = self.data.get(self.args.split, "")  # validation path
         self.is_dota = isinstance(val, str) and "DOTA" in val  # is COCO
+        self.ne = self.data["num_extra_parameters"]
         # self.stats["pred_z"] = []
         # self.stats["target_z"] = []
         self.stats["z_pairs"] = []
@@ -145,7 +146,7 @@ class ZAxisValidator(PoseValidator):
         idx = batch["batch_idx"] == si
         cls = batch["cls"][idx].squeeze(-1)
         bbox = batch["bboxes"][idx]
-        z = batch["extra_parameters"][idx]
+        z = batch["extra_parameters"][idx][:,0:1]
         ori_shape = batch["ori_shape"][si]
         imgsz = batch["img"].shape[2:]
         ratio_pad = batch.pop("ratio_pad", None)
@@ -170,7 +171,7 @@ class ZAxisValidator(PoseValidator):
             pbatch["imgsz"], predn[:, :4], pbatch["ori_shape"], ratio_pad=pbatch["ratio_pad"]
         )  # native-space pred
         nk = pbatch["kpts"].shape[1]
-        pred_kpts = predn[:, 7:].view(len(predn), nk, -1)
+        pred_kpts = predn[:, 6+self.ne:].view(len(predn), nk, -1)
         pred_kpts = scale_coords(pbatch["imgsz"], pred_kpts, pbatch["ori_shape"], ratio_pad=pbatch["ratio_pad"])
         return predn, pred_kpts
 

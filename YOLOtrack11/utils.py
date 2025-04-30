@@ -6,7 +6,7 @@ import numpy as np
 
 def imread(filename: str, flags: int = cv2.IMREAD_UNCHANGED):
     """
-    Read an image from a file.
+    Read an image from a file. This is a patch to fix the imread function in ultralytics.utils.patches allowing for 16-bit images.
 
     Args:
         filename (str): Path to the file to read.
@@ -19,7 +19,8 @@ def imread(filename: str, flags: int = cv2.IMREAD_UNCHANGED):
 
 
 def scale_img(img, ratio=1.0, same_shape=False, gs=32):
-    """Scales and pads an image tensor, optionally maintaining aspect ratio and padding to gs multiple."""
+    """Scales and pads an image tensor, optionally maintaining aspect ratio and padding to gs multiple.
+    This is a patch to fix the scale_img function in ultralytics.utils.torch_utils taking the image mean as the padding value."""
     if ratio == 1.0:
         return img
     h, w = img.shape[2:]
@@ -34,18 +35,7 @@ def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None, padding=True, xyw
     Rescales bounding boxes (in the format of xyxy by default) from the shape of the image they were originally
     specified in (img1_shape) to the shape of a different image (img0_shape).
 
-    Args:
-        img1_shape (tuple): The shape of the image that the bounding boxes are for, in the format of (height, width).
-        boxes (torch.Tensor): the bounding boxes of the objects in the image, in the format of (x1, y1, x2, y2)
-        img0_shape (tuple): the shape of the target image, in the format of (height, width).
-        ratio_pad (tuple): a tuple of (ratio, pad) for scaling the boxes. If not provided, the ratio and pad will be
-            calculated based on the size difference between the two images.
-        padding (bool): If True, assuming the boxes is based on image augmented by yolo style. If False then do regular
-            rescaling.
-        xywh (bool): The box format is xywh or not, default=False.
-
-    Returns:
-        boxes (torch.Tensor): The scaled bounding boxes, in the format of (x1, y1, x2, y2)
+    This is a patch of the function in ultralytics.utils.ops to disable the clipping of boxes to the image size.
     """
     if ratio_pad is None:  # calculate from img0_shape
         gain = min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])  # gain  = old / new
@@ -70,17 +60,8 @@ def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None, normalize=False
     """
     Rescale segment coordinates (xy) from img1_shape to img0_shape.
 
-    Args:
-        img1_shape (tuple): The shape of the image that the coords are from.
-        coords (torch.Tensor): the coords to be scaled of shape n,2.
-        img0_shape (tuple): the shape of the image that the segmentation is being applied to.
-        ratio_pad (tuple): the ratio of the image size to the padded image size.
-        normalize (bool): If True, the coordinates will be normalized to the range [0, 1]. Defaults to False.
-        padding (bool): If True, assuming the boxes is based on image augmented by yolo style. If False then do regular
-            rescaling.
+    This is a patch of the function in ultralytics.utils.ops to disable the clipping of coordinates to the image size.
 
-    Returns:
-        coords (torch.Tensor): The scaled coordinates.
     """
     if ratio_pad is None:  # calculate from img0_shape
         gain = min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])  # gain  = old / new
@@ -99,12 +80,3 @@ def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None, normalize=False
         coords[..., 0] /= img0_shape[1]  # width
         coords[..., 1] /= img0_shape[0]  # height
     return coords
-
-# def scale_to_physical(kpts, z, physical_scale, orig_shape):
-#     h, w, d = physical_scale
-#     kpts = kpts.clone()
-#     z = z.clone()
-#     kpts[..., 0] *= w / orig_shape[0]
-#     kpts[..., 1] *= h / orig_shape[1]
-#     z *= d
-#     return kpts,z

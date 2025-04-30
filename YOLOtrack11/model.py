@@ -25,44 +25,37 @@ class ZAxis(Pose):
     def __init__(self, nc=80, num_extra_parameters=1, kpt_shape=(1,2), ch=()):
         """Initialize ZAxis with number of classes `nc` and layer channels `ch`."""
         super().__init__(nc,kpt_shape, ch)
-        self.kpt_branch = self.cv4
         self.ne = num_extra_parameters  # number of extra parameters
+        c4 = max(ch[0] // 4, self.ne) # number of channels in the last layer
+        self.kpt_branch = self.cv4 #rename cv4 branch (from Pose head) to kpt_branch
+        self.z_branch = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.ne, 1)) for x in ch) #z_branch!
 
-        c4 = max(ch[0] // 4, self.ne)
-        self.z_branch = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.ne, 1)) for x in ch)
-
-
-        # self.kpt_shape = kpt_shape  # number of keypoints, number of dims (2 for x,y or 3 for x,y,visible)
-        # self.nk = kpt_shape[0] * kpt_shape[1]  # number of keypoints total
-
-        # c4 = max(ch[0] // 4, self.nk)
-        # self.kpt_branch = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.nk, 1)) for x in ch)
 
     def forward(self, x):
         """Concatenates and returns predicted bounding boxes and class probabilities."""
         bs = x[0].shape[0]  # batch size
-        z = torch.cat([self.z_branch[i](x[i]).view(bs, self.ne, -1) for i in range(self.nl)], 2)  # z theta logits
-        kpt = torch.cat([self.kpt_branch[i](x[i]).view(bs, self.nk, -1) for i in range(self.nl)], -1)  # (bs, 17*3, h*w)
+        z = torch.cat([self.z_branch[i](x[i]).view(bs, self.ne, -1) for i in range(self.nl)], 2)  # z branch output (bs, num_extra_parameters, num_grid_cells) 
+        kpt = torch.cat([self.kpt_branch[i](x[i]).view(bs, self.nk, -1) for i in range(self.nl)], -1)  # kpt branch output (bs, num_keypoints, num_grid_cells)
 
 
-        # NOTE: set `angle` as an attribute so that `decode_bboxes` could use it.
-        z = z.sigmoid() # z = [0,1]
-        if not self.training:
-            self.z = z
+        # Forward pass through detection head
+        print(len(x))
         x = Detect.forward(self, x)
+
+        # on training, return x, z, kpt
         if self.training:
             return x, z, kpt
-        pred_kpt = self.kpts_decode(bs, kpt)
 
+        # else, decode kpts first 
+        pred_kpt = self.kpts_decode(bs, kpt)
         return torch.cat([x, z,pred_kpt], 1) if self.export else (torch.cat([x[0],z, pred_kpt], 1), (x[1],z, kpt))
 
-    # def decode_bboxes(self, bboxes, anchors): not needed for for z-axis detection
-    #     """Decode rotated bounding boxes."""
-    #     return dist2rbox(bboxes, self.angle, anchors, dim=1)
 
 
+## below here is just boilerplate code to to make the model work with the ultralytics package
 class ZAxisModel(DetectionModel):
     """YOLOv8 Z-Axis model."""
+
 
     def __init__(self, cfg="YOLOtrackv11.yaml", ch=1, nc=None, num_extra_parameters=1, kpt_shape=[], verbose=True):
         """Initialize YOLOv8 Z-Axis model with given config and parameters."""
@@ -102,7 +95,7 @@ class ZAxisModel(DetectionModel):
                 """Performs a forward pass through the model, handling different Detect subclass types accordingly."""
                 if self.end2end:
                     return self.forward(x)["one2many"]
-                return self.forward(x)[0] if isinstance(m, (Segment, Pose, OBB, ZAxis)) else self.forward(x)
+                return self.forward(x)[0] if isinstance(m, (Segment, Pose, OBB, ZAxis)) else self.forward(x) # this is a hack to make the model work with the ultralytics package, as the head 
 
             m.stride = torch.tensor([s / x.shape[-2] for x in _forward(torch.zeros(1, ch, s, s))])  # forward
             self.stride = m.stride

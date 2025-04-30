@@ -5,65 +5,59 @@ from ultralytics.utils.tal import TaskAlignedAssigner,make_anchors
 from ultralytics.utils.ops import xywh2xyxy
 
 class v8ZAxisLoss(v8PoseLoss):
-    """Calculates losses for object detection, classification, and box distribution in Zaxis YOLO models."""
+    """Calculates losses for object detection, classification, and box distribution in ZAxis YOLO model."""
 
     def __init__(self, model):
-        """Initializes v8ZAxisLoss; note model must be de-paralleled."""
         super().__init__(model)
-        self.mse = nn.MSELoss(reduction="none")
+        self.num_extra_parameters = model.num_extra_parameters
+        #set custom assigner for zaxis model to handle z-axis branch predictions, parameters are set to default values
         self.assigner = ZAxisTaskAlignedAssigner(topk=10, num_classes=self.nc, alpha=0.5, beta=6.0)
 
+        #set custom loss function for z output
+        self.z_loss = nn.MSELoss(reduction="none")
 
-    def preprocess(self, targets, batch_size, scale_tensor):
-        """Preprocesses the target counts and matches with the input batch size to output a tensor."""
-        nl, ne = targets.shape
-        if nl == 0:
-            out = torch.zeros(batch_size, 0, ne - 1, device=self.device)
-        else:
-            i = targets[:, 0]  # image index
-            _, counts = i.unique(return_counts=True)
-            counts = counts.to(dtype=torch.int32)
-            out = torch.zeros(batch_size, counts.max(), ne - 1, device=self.device)
-            for j in range(batch_size):
-                matches = i == j
-                n = matches.sum()
-                if n:
-                    out[j, :n] = targets[matches, 1:]
-            out[..., 1:5] = xywh2xyxy(out[..., 1:5].mul_(scale_tensor))
-        return out
     def __call__(self, preds, batch):
         """Calculate and return the loss for the YOLO model."""
-        loss = torch.zeros(6, device=self.device)  # box, cls, dfl
-        feats, pred_z,pred_kpts = preds if isinstance(preds[0], list) else preds[1]
+
+        # Initialize loss container
+        loss = torch.zeros(6, device=self.device)  # box, cls, dfl,z,pose, kobj
+
+        # Unpack predictions passed from the model (see model.py). pred_z and pred_kpts are the z-axis and xy predictions
+        feats, pred_extra_parameters,pred_kpts = preds if isinstance(preds[0], list) else preds[1]
+        pred_z = pred_extra_parameters[:,0].unsqueeze(1)  # (b, h*w, 1)
+
+        # Unpack bbox distribution and scores
         pred_distri, pred_scores = torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2).split(
             (self.reg_max * 4, self.nc), 1
         )
 
+        # Reshape predictions
         pred_scores = pred_scores.permute(0, 2, 1).contiguous()
         pred_distri = pred_distri.permute(0, 2, 1).contiguous()
         pred_z = pred_z.permute(0, 2, 1).contiguous()
         pred_kpts = pred_kpts.permute(0, 2, 1).contiguous()
 
+        # the anchor points are the center of the grid cells, uniformly distributed in the image
+        # the stride is the size of the grid cells in the image
         dtype = pred_scores.dtype
         batch_size = pred_scores.shape[0]
         imgsz = torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]  # image size (h,w)
         anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
 
-        # Targets
+        # Preprocess targets
         batch_idx = batch["batch_idx"].view(-1, 1)
-        targets = torch.cat((batch_idx, batch["cls"].view(-1, 1), batch["bboxes"], batch["extra_parameters"].view(-1,1)), 1)
+        targets = torch.cat((batch_idx, batch["cls"].view(-1, 1), batch["bboxes"], batch["extra_parameters"][:,0].view(-1,1)), 1) #concat ground truth
         targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
-        gt_labels, gt_bboxes, gt_z = targets.split((1, 4,1), 2)  # cls, xyxyz
+        gt_labels, gt_bboxes, gt_z = targets.split((1, 4,1), 2)  # split up ground truth again
+
+        # mask gt is used to filter out the empty gt boxes
         mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0.0)
 
-        # target_z = batch["z"].to(self.device)
-        # Pboxes
+        # Decode localized predictions from anchor point offsets
         pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyxy, (b, h*w, 4)
-        pred_kpts = self.kpts_decode(anchor_points, pred_kpts.view(batch_size, -1, *self.kpt_shape))  # (b, h*w, 17, 3)
+        pred_kpts = self.kpts_decode(anchor_points, pred_kpts.view(batch_size, -1, *self.kpt_shape))  # (b, h*w, *kpt_shape)
 
-        # dfl_conf = pred_distri.view(batch_size, -1, 4, self.reg_max).detach().softmax(-1)
-        # dfl_conf = (dfl_conf.amax(-1).mean(-1) + dfl_conf.amax(-1).amin(-1)) / 2
-
+        # the assigner is used to assign the ground truth to the anchor points by taking into account the localization, classification, z-axis and keypoint accuracy
         _, target_bboxes, target_z,target_scores, fg_mask, target_gt_idx = self.assigner(
             # pred_scores.detach().sigmoid() * 0.8 + dfl_conf.unsqueeze(-1) * 0.2,
             pred_scores.detach().sigmoid(),
@@ -78,32 +72,28 @@ class v8ZAxisLoss(v8PoseLoss):
 
         target_scores_sum = max(target_scores.sum(), 1)
 
-        # Cls loss
-        # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
+        # Class label loss
         loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
 
-        # Bbox loss
+        # localized feature loss calculations
         if fg_mask.sum():
             target_bboxes /= stride_tensor
+            # Bounding box loss
             loss[0], loss[2] = self.bbox_loss(
                 pred_distri, pred_bboxes, anchor_points, target_bboxes, target_scores, target_scores_sum, fg_mask
             )
             keypoints = batch["keypoints"].to(self.device).float().clone()
             keypoints[..., 0] *= imgsz[1]
             keypoints[..., 1] *= imgsz[0]
-
+            #keypoint loss
             loss[4], loss[5] = self.calculate_keypoints_loss(
                 fg_mask, target_gt_idx, keypoints, batch_idx, stride_tensor, target_bboxes, pred_kpts
             )
 
         #Z-Axis loss
         weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
-        # loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
-        loss[3] = (self.mse(pred_z[fg_mask],target_z[fg_mask])*weight).sum()/ (target_scores_sum)
+        loss[3] = (self.z_loss(pred_z[fg_mask],target_z[fg_mask])*weight).sum()/ (target_scores_sum)
 
-        # loss[4], loss[5] = self.calculate_keypoints_loss(
-        #         fg_mask, target_gt_idx, keypoints, batch_idx, stride_tensor, target_bboxes, pred_kpts
-        #     )
 
         loss[0] *= self.hyp.box  # box gain
         loss[1] *= self.hyp.cls  # cls gain
@@ -118,25 +108,11 @@ class ZAxisTaskAlignedAssigner(TaskAlignedAssigner):
     @torch.no_grad()
     def forward(self, pd_scores, pd_bboxes, pd_z, anc_points, gt_labels, gt_bboxes,gt_z, mask_gt):
         """
-        Compute the task-aligned assignment. Reference code is available at
-        https://github.com/Nioolek/PPYOLOE_pytorch/blob/master/ppyoloe/assigner/tal_assigner.py.
+        Compute the task-aligned assignment. See https://arxiv.org/pdf/2108.07755 for details.
 
-        Args:
-            pd_scores (Tensor): shape(bs, num_total_anchors, num_classes)
-            pd_bboxes (Tensor): shape(bs, num_total_anchors, 4)
-            pd_z (Tensor): shape(bs, num_total_anchors, 1)
-            anc_points (Tensor): shape(num_total_anchors, 2)
-            gt_labels (Tensor): shape(bs, n_max_boxes, 1)
-            gt_bboxes (Tensor): shape(bs, n_max_boxes, 4)
-            mask_gt (Tensor): shape(bs, n_max_boxes, 1)
-
-        Returns:
-            target_labels (Tensor): shape(bs, num_total_anchors)
-            target_bboxes (Tensor): shape(bs, num_total_anchors, 4)
-            target_scores (Tensor): shape(bs, num_total_anchors, num_classes)
-            target_z (Tensor): shape(bs, num_total_anchors, 1)
-            fg_mask (Tensor): shape(bs, num_total_anchors)
-            target_gt_idx (Tensor): shape(bs, num_total_anchors)
+        The TAL is used to align the different tasks (classification, localization, and z-axis, ...) by assigning the
+        best matching ground truth object for each anchor point. The assignment is based on the predicted scores,
+        predicted bounding boxes, and the z-axis predictions.
         """
         self.bs = pd_scores.shape[0]
         self.n_max_boxes = gt_bboxes.shape[1]
@@ -253,5 +229,5 @@ class ZAxisTaskAlignedAssigner(TaskAlignedAssigner):
         gt_z = gt_z.unsqueeze(2).expand(-1, -1, na, -1)[mask_gt].type(torch.float16)
         z_similarity[mask_gt] = (1 - torch.abs(pd_z - gt_z) / ((torch.max(gt_z) - torch.min(gt_z) + self.eps))).squeeze().type(pd_z.dtype)
 
-        align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta) * z_similarity.pow(40)
+        align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta) * z_similarity.pow(20)
         return align_metric, overlaps,z_similarity

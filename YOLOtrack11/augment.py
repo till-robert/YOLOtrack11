@@ -94,7 +94,7 @@ class LetterBox(ultralytics.data.augment.LetterBox):
             img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
         top, bottom = int(round(dh - 0.1)) if self.center else 0, int(round(dh + 0.1))
         left, right = int(round(dw - 0.1)) if self.center else 0, int(round(dw + 0.1))
-        value = 2**16 /2 if img.dtype == np.uint16 else 128.
+        value = 2e4 if img.dtype == np.uint16 else 128.
         img = cv2.copyMakeBorder(
             img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(value,)*3
         )  # add border
