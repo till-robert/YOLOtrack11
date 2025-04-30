@@ -169,30 +169,26 @@ def _chooseParameters(parameters: Dict[str, Any], rng: np.random.Generator, keys
             params[key] = parameters[key]
     return params
 
-downsampled_refstack = (np.load("ripples_downsampled.npy"))-2e4
-amp = np.load("amplitudes.npy")
-resize_factor = 4 # original refstack shape: 512,512
-#centerpoint/focus at:
-x0, y0, z0 = 64.4   ,63.7, 761
+
 
 
 def generateImage(
         objects: pd.DataFrame,
         image_size: Union[int, Tuple[int, int]],
+        refstack: np.ndarray,
         noise: Union[float, List[float]] = None,
         snr: Union[float, List[float]] = None,
-        refstack: np.ndarray = downsampled_refstack,
-        refstack_center: Tuple[float, float] = (y0, x0),
+        refstack_center: Tuple[float, float] = None,
         rng: np.random.Generator = np.random.default_rng(),
         ) -> Tuple[List[np.ndarray], List[str], List[float], np.ndarray]:
     """Generates a synthetic image with the specified objects and parameters
     Args:
         objects (pd.DataFrame): Objects to be added to the image
         image_size (Union[int, Tuple[int, int]]): Size of the image frame. Either `int` for a square size frame or `(y: int,x: int)` for a rectangular image
+        refstack (np.ndarray, optional): Reference stack to be used for generating the image.
         noise (Union[float, List[float]], optional): Standard deviation of the Gaussian noise to be added to the image. If a list is provided, it will be randomly selected from the range.
         snr (Union[float, List[float]], optional): Signal-to-noise ratio range. If a list is provided, it will be randomly selected from the range.  If neither `noise` nor `snr` is provided, the image will be generated without noise.
-        refstack (np.ndarray, optional): Reference stack to be used for generating the image.
-        refstack (Tuple[float, float], optional): center point (y,x) for the image. Defaults to (y0, x0).
+        refstack_center (Tuple[float, float], optional): center point (y,x) for the refstack, if it is not defined, the center of the image will be used. The coordinates must be in the range of the refstack image size.
         rng (np.random.Generator, optional): Random number generator to be used. Defaults to `np.random.default_rng()`.
     Returns:
         np.ndarray: the generated image
@@ -203,6 +199,8 @@ def generateImage(
         raise ValueError("refstack must be a 3D numpy array")
     if isinstance(refstack, np.ndarray) and refstack.shape[1] != refstack.shape[2]:
         raise ValueError("refstack must be a square 3D numpy array")
+    if refstack_center is None:
+        refstack_center = (refstack.shape[1]//2, refstack.shape[2]//2)
     if not isinstance(refstack_center, tuple) or len(refstack_center) != 2:
         raise ValueError("refstack_center must be a tuple of two floats")
     if refstack_center[0] < 0 or refstack_center[1] < 0 or refstack_center[0] >= refstack.shape[1] or refstack_center[1] >= refstack.shape[2]:
