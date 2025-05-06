@@ -39,7 +39,7 @@ class ZAxis(Pose):
 
 
         # Forward pass through detection head
-        print(len(x))
+        # print(len(x))
         x = Detect.forward(self, x)
 
         # on training, return x, z, kpt

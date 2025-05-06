@@ -5,8 +5,7 @@ from os import remove
 #     remove("data_gen/Dataset/labels/val.cache")
 # except:
 #     pass
-model = YOLOtrack11("../ultralytics/runs/pose/train129/weights/last.pt")
-# model = YOLOtrack11("yolo11n-zaxis.yaml")
+# model = YOLOtrack11("../ultralytics/runs/pose/train129/weights/last.pt")
 # print(model.model.model)
 # print("loaded")
 # for par in model.model.model.parameters():
@@ -23,6 +22,12 @@ model = YOLOtrack11("../ultralytics/runs/pose/train129/weights/last.pt")
 
 # model.add_callback("on_pretrain_routine_end", on_pretrain_routine_end)
 
-results = model.train(data="datasets/dataset_subpixel_real.yaml", epochs=20, imgsz=(640,540), z=5,freeze=0,box=0,cls=0,dfl=0,pose=0)
+model = YOLOtrack11("yolo11n-zaxis.yaml")
+results = model.train(data="datasets/dataset_subpixel.yaml", epochs=40, imgsz=(640,540),fraction=0.02)#, z=5,freeze=0,box=0,cls=0,dfl=0,pose=0)
+# results = model.train(data="datasets/dataset_subpixel.yaml", epochs=40, imgsz=(640,540),fraction=0.1)#, z=5,freeze=0,box=0,cls=0,dfl=0,pose=0)
+# results = model.train(data="datasets/dataset_subpixel.yaml", epochs=40, imgsz=(640,540),fraction=0.2)#, z=5,freeze=0,box=0,cls=0,dfl=0,pose=0)
+results = model.train(data="datasets/dataset_subpixel.yaml", epochs=40, imgsz=(640,540),fraction=0.4)#, z=5,freeze=0,box=0,cls=0,dfl=0,pose=0)
+# results = model.train(data="datasets/dataset_subpixel.yaml", epochs=40, imgsz=(640,540))#, z=5,freeze=0,box=0,cls=0,dfl=0,pose=0)
 print("test")
 
+    

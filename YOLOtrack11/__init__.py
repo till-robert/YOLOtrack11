@@ -15,8 +15,10 @@ Modules:
 
 __all__ = ["dataset", "loss", "model", "val", "predict", "utils", "results", "instance"]
 
+
+
 import ultralytics
-from ultralytics.utils import yaml_load
+from ultralytics.utils import yaml_load, SettingsManager, SETTINGS_FILE
 from pathlib import Path
 from .utils import imread
 from .instance import Instances
@@ -40,6 +42,8 @@ get_cfg = lambda cfg=DEFAULT_CFG_DICT, overrides=None: get_cfg_old(cfg, override
 ultralytics.cfg.get_cfg = get_cfg
 ultralytics.engine.validator.get_cfg = get_cfg
 
+
+
 # Patch AutoBackend class
 autobackend_base = ultralytics.nn.autobackend.AutoBackend
 class AutoBackend(autobackend_base):
@@ -60,10 +64,14 @@ class AutoBackend(autobackend_base):
 ultralytics.nn.autobackend.AutoBackend = AutoBackend
 ultralytics.engine.validator.AutoBackend = AutoBackend
 ultralytics.engine.predictor.AutoBackend = AutoBackend
+
+# Patch imread function
 ultralytics.utils.patches.imread = imread
 ultralytics.data.loaders.imread = imread
 
+# Patch Instances class
 ultralytics.utils.instance.Instances = Instances
+
 
 from .model import ZAxisModel
 from .train import ZAxisTrainer
