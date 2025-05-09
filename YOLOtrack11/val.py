@@ -8,7 +8,7 @@ import torch
 from ultralytics.models.yolo.pose import PoseValidator
 from ultralytics.models.yolo.detect import DetectionValidator
 from ultralytics.utils import LOGGER, ops, callbacks, emojis,TQDM,colorstr
-from ultralytics.utils.metrics import batch_probiou,box_iou,Metric,ap_per_class,SimpleClass
+from ultralytics.utils.metrics import batch_probiou,box_iou,Metric,compute_ap,SimpleClass, plot_mc_curve, plot_pr_curve, smooth
 from ultralytics.utils.torch_utils import smart_inference_mode, select_device, de_parallel
 from ultralytics.utils.checks import check_imgsz
 from ultralytics.data.utils import check_cls_dataset, check_det_dataset
@@ -26,12 +26,12 @@ from sklearn.metrics import r2_score,mean_squared_error
 
 class ZAxisValidator(PoseValidator):
     """
-    A class extending the DetectionValidator class for validation based on an Oriented Bounding Box (OBB) model.
+    A class extending the Validator class based on an Oriented Bounding Box (OBB) and Pose Validator.
 
     Example:
         ```python
 
-        args = dict(model="yolov8n-obb.pt", data="dota8.yaml")
+        args = dict(model="yolov8n-zaxis.yml", data="path/to/dataset.yaml")
         validator = ZAxisValidator(args=args)
         validator(model=args["model"])
         ```
@@ -561,8 +561,11 @@ class ZAxisMetrics(SimpleClass):
             names=self.names,
             on_plot=self.on_plot,
         )[2:]
+        self.all_box_results = {k:v for k,v in zip(["p", "r", "f1", "ap", "unique_classes", "p_curve", "r_curve", "f1_curve", "x", "prec_values"], results)}
+        #p, r, f1, ap, unique_classes.astype(int), p_curve, r_curve, f1_curve,...
+        box_results = [r[:,0] if i in (0,1,2,5,6,7) else r for i,r in enumerate(results)] # only single iou value for box results
         self.box.nc = len(self.names)
-        self.box.update(results)
+        self.box.update(box_results)
         self.num_iou_levels = z_pairs.shape[1]
         nan_mask = [~np.any(np.isnan(z_pairs[:,i]),axis=1) for i in range(self.num_iou_levels)]
         self.z_pairs = [z_pairs[:,i][nan_mask[i]].T for i in range(self.num_iou_levels)] #filter out nans
@@ -646,3 +649,91 @@ class ZAxisMetrics(SimpleClass):
 
             distances.append(distance)
         return distances
+    
+def ap_per_class(
+    tp, conf, pred_cls, target_cls, plot=False, on_plot=None, save_dir=Path(), names={}, eps=1e-16, prefix=""
+):
+    """
+    Computes the average precision per class for object detection evaluation. Modified to compute for all iou values.
+
+    Args:
+        tp (np.ndarray): Binary array indicating whether the detection is correct (True) or not (False).
+        conf (np.ndarray): Array of confidence scores of the detections.
+        pred_cls (np.ndarray): Array of predicted classes of the detections.
+        target_cls (np.ndarray): Array of true classes of the detections.
+        plot (bool, optional): Whether to plot PR curves or not. Defaults to False.
+        on_plot (func, optional): A callback to pass plots path and data when they are rendered. Defaults to None.
+        save_dir (Path, optional): Directory to save the PR curves. Defaults to an empty path.
+        names (dict, optional): Dict of class names to plot PR curves. Defaults to an empty tuple.
+        eps (float, optional): A small value to avoid division by zero. Defaults to 1e-16.
+        prefix (str, optional): A prefix string for saving the plot files. Defaults to an empty string.
+
+    Returns:
+        tp (np.ndarray): True positive counts at threshold given by max F1 metric for each class.Shape: (nc,).
+        fp (np.ndarray): False positive counts at threshold given by max F1 metric for each class. Shape: (nc,).
+        p (np.ndarray): Precision values at threshold given by max F1 metric for each class. Shape: (nc,).
+        r (np.ndarray): Recall values at threshold given by max F1 metric for each class. Shape: (nc,).
+        f1 (np.ndarray): F1-score values at threshold given by max F1 metric for each class. Shape: (nc,).
+        ap (np.ndarray): Average precision for each class at different IoU thresholds. Shape: (nc, 10).
+        unique_classes (np.ndarray): An array of unique classes that have data. Shape: (nc,).
+        p_curve (np.ndarray): Precision curves for each class. Shape: (nc, 1000).
+        r_curve (np.ndarray): Recall curves for each class. Shape: (nc, 1000).
+        f1_curve (np.ndarray): F1-score curves for each class. Shape: (nc, 1000).
+        x (np.ndarray): X-axis values for the curves. Shape: (1000,).
+        prec_values (np.ndarray): Precision values at mAP@0.5 for each class. Shape: (nc, 1000).
+    """
+    # Sort by objectness
+    i = np.argsort(-conf)
+    tp, conf, pred_cls = tp[i], conf[i], pred_cls[i]
+
+    # Find unique classes
+    unique_classes, nt = np.unique(target_cls, return_counts=True)
+    nc = unique_classes.shape[0]  # number of classes, number of detections
+
+    # Create Precision-Recall curve and compute AP for each class
+    x, prec_values = np.linspace(0, 1, 1000), []
+
+    # Average precision, precision and recall curves
+    ap, p_curve, r_curve = np.zeros((nc, tp.shape[1])), np.zeros((nc, tp.shape[-1], 1000)), np.zeros((nc, tp.shape[-1], 1000))
+    for ci, c in enumerate(unique_classes):
+        i = pred_cls == c
+        n_l = nt[ci]  # number of labels
+        n_p = i.sum()  # number of predictions
+        if n_p == 0 or n_l == 0:
+            continue
+
+        # Accumulate FPs and TPs
+        fpc = (1 - tp[i]).cumsum(0)
+        tpc = tp[i].cumsum(0)
+
+        # Recall
+        recall = tpc / (n_l + eps)  # recall curve
+        r_curve[ci] = [np.interp(-x, -conf[i], recall[:, j], left=0) for j in range(tp.shape[-1])]  # negative x, xp because xp decreases
+
+        # Precision
+        precision = tpc / (tpc + fpc)  # precision curve
+        p_curve[ci] = [np.interp(-x, -conf[i], precision[:, j], left=1) for j in range(tp.shape[-1])]  # p at pr_score
+
+        # AP from recall-precision curve
+        for j in range(tp.shape[1]):
+            ap[ci, j], mpre, mrec = compute_ap(recall[:, j], precision[:, j])
+            if j == 0:
+                prec_values.append(np.interp(x, mrec, mpre))  # precision at mAP@0.5
+
+    prec_values = np.array(prec_values)  # (nc, 1000)
+
+    # Compute F1 (harmonic mean of precision and recall)
+    f1_curve = 2 * p_curve * r_curve / (p_curve + r_curve + eps)
+    names = [v for k, v in names.items() if k in unique_classes]  # list: only classes that have data
+    names = dict(enumerate(names))  # to dict
+    # if plot:
+    #     plot_pr_curve(x, prec_values, ap, save_dir / f"{prefix}PR_curve.png", names, on_plot=on_plot)
+    #     plot_mc_curve(x, f1_curve, save_dir / f"{prefix}F1_curve.png", names, ylabel="F1", on_plot=on_plot)
+    #     plot_mc_curve(x, p_curve, save_dir / f"{prefix}P_curve.png", names, ylabel="Precision", on_plot=on_plot)
+    #     plot_mc_curve(x, r_curve, save_dir / f"{prefix}R_curve.png", names, ylabel="Recall", on_plot=on_plot)
+
+    i = np.array([smooth(f1_curve[:,j].mean(0), 0.1).argmax() for j in range(tp.shape[1])])  # max F1 index
+    p, r, f1 = p_curve[:,np.arange(tp.shape[-1]),i], r_curve[:,np.arange(tp.shape[-1]), i], f1_curve[:,np.arange(tp.shape[-1]), i]  # max-F1 precision, recall, F1 values
+    tp = (r * nt).round()  # true positives
+    fp = (tp / (p + eps) - tp).round()  # false positives
+    return tp, fp, p, r, f1, ap, unique_classes.astype(int), p_curve, r_curve, f1_curve, x, prec_values
