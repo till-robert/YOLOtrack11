@@ -2,7 +2,7 @@ import PIL
 import numpy as np
 yundon_img = (-1,None) #img_idx, imgfile
 imgpaths = ["BGC101_H2V2Z1_Ch1_zstack_1_MMStack_Pos0.ome.tif","BGC101_H2V2Z1_Ch1_zstack_1_MMStack_Pos0_1.ome.tif","BGC101_H2V2Z1_Ch1_zstack_1_MMStack_Pos0_2.ome.tif","BGC101_H2V2Z1_Ch1_zstack_1_MMStack_Pos0_3.ome.tif",]
-imglengths = [PIL.Image.open("../../Pictures/" + imgpath).n_frames for imgpath in imgpaths]
+imglengths = [PIL.Image.open("/home/jupyter-till/Pictures/" + imgpath).n_frames for imgpath in imgpaths]
 def open_yundon_img(idx):
     global yundon_img
     global imgpaths
@@ -14,7 +14,7 @@ def open_yundon_img(idx):
 
     if yundon_img[0] != i: #if correct image is not loaded:
         if isinstance(yundon_img[1], PIL.Image.Image): yundon_img[1].close() #close old image
-        yundon_img = i,PIL.Image.open("../../Pictures/"+imgpaths[i])
+        yundon_img = i,PIL.Image.open("/home/jupyter-till/Pictures/"+imgpaths[i])
     try:
         yundon_img[1].seek(idx)
     except ValueError as e:
@@ -22,7 +22,7 @@ def open_yundon_img(idx):
 
     return yundon_img[1]
 def gt_yundon(idx):
-    x,y,z=np.loadtxt("../../Pictures/TrackingResultBugs_4th_TrackingGroundTruthScript250213.csv", delimiter=",").T
+    x,y,z=np.loadtxt("/home/jupyter-till/Pictures/TrackingResultBugs_4th_TrackingGroundTruthScript250213.csv", delimiter=",").T
     x/=0.325
     y/=0.325
 

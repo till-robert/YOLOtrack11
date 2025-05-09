@@ -12,7 +12,7 @@ pip install ultralytics
 
 ### How to use
 
-See `zaxis_*.py/.ipynb` and `ImageGenerator.ipynb`
+See `notebooks/zaxis_*.py/.ipynb` and `notebooks/ImageGenerator.ipynb`
 
 
 ### Notes

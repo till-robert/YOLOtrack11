@@ -187,3 +187,5 @@ ultralytics/
 *.html
 *.mp4
 *.pdf
+_build/**/*
+_config.yml

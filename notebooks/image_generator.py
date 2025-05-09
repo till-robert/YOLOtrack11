@@ -337,10 +337,14 @@ def generateImage(
     image = image.clip(0,2**16-1)
 
     # print(intensity)
-    return image
+    info_dict = {
+        "noise": noise_std,
+        "n": len(objects),
+        }
+    return image, info_dict
 
 def _image_blend(img1: np.ndarray, img2: np.ndarray, alpha: float) -> np.ndarray:
-    """Blend two images together using the specified alpha value
+    """Linear blend of two images together using the specified alpha value
 
     Args:
         img1 (np.ndarray): first image
@@ -359,7 +363,7 @@ def _image_blend(img1: np.ndarray, img2: np.ndarray, alpha: float) -> np.ndarray
 
 
 def _subpixel_blending(x: float, y:float, img:np.ndarray) -> np.ndarray:
-    """Subpixel blending of the image
+    """Subpixel blending of the image using bilinear interpolation
 
     Args:
         x (float): x subpixel position (0-1)
