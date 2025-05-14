@@ -188,4 +188,5 @@ ultralytics/
 *.mp4
 *.pdf
 _build/**/*
-_config.yml
+_toc.yml.save
+build_book.sh

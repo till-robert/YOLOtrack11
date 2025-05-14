@@ -339,7 +339,6 @@ def generateImage(
     # print(intensity)
     info_dict = {
         "noise": noise_std,
-        "n": len(objects),
         }
     return image, info_dict
 
