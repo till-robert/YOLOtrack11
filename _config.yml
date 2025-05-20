@@ -96,3 +96,5 @@ sphinx:
     # html_theme: furo
     # html_theme_options:
     #   source_repository: https://github.com/till-robert/YOLOtrack11
+    comments_config:
+      hypothesis: True
