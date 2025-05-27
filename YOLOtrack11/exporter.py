@@ -38,22 +38,9 @@ class Exporter(ul_exporter.Exporter):
         flags = [x == fmt for x in fmts]
         if sum(flags) != 1:
             raise ValueError(f"Invalid export format='{fmt}'. Valid formats are {fmts}")
-        (
-            jit,
-            onnx,
-            xml,
-            engine,
-            coreml,
-            saved_model,
-            pb,
-            tflite,
-            edgetpu,
-            tfjs,
-            paddle,
-            mnn,
-            ncnn,
-            imx,
-        ) = flags  # export booleans
+        (jit, onnx, xml, engine, coreml, saved_model, pb, tflite, edgetpu, tfjs, paddle, mnn, ncnn, imx, rknn) = (
+            flags  # export booleans
+        )
         is_tf_format = any((saved_model, pb, tflite, edgetpu, tfjs))
 
         # Device
