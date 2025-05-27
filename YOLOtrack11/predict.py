@@ -52,6 +52,7 @@ class ZAxisPredictor(PosePredictor):
             self.imgsz,
             auto=same_shapes and (self.model.pt or (getattr(self.model, "dynamic", False) and not self.model.imx)),
             stride=self.model.stride,
+            background_value=float(self.args.background_level),
         )
         return [letterbox(image=x) for x in im]
 

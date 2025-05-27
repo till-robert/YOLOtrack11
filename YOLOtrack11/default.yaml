@@ -127,5 +127,6 @@ cfg: # (str, optional) for overriding defaults.yaml
 # Tracker settings ------------------------------------------------------------------------------------------------------
 tracker: botsort.yaml # (str) tracker type, choices=[botsort.yaml, bytetrack.yaml]
 
-z_corr: False
-physical_scale: [416, 351,210] #field of view of data in x,y,z (in um) used in validation output
+
+# custom zaxis settings ---------------------------------------------------------------------------------------------------
+background_level: 2e4 # (float) background level for images
