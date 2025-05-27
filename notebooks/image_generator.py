@@ -1,4 +1,4 @@
-"""# Synthetic Image Generator for YOLOv8
+"""Synthetic Image Generator for YOLOv8
 
 Backend for the Image Generator notebook
 
@@ -23,30 +23,30 @@ import warnings
 import pandas as pd
 from itertools import repeat, chain
 from numba import njit
-class Object:
-    """Class representing a particle that may be added to the image
-    """
-    def __init__(self, x : float, y : float, label : str, intensity: float = 1, **pars):
-        """Initializes an Object
+# class Object:
+#     """Class representing a particle that may be added to the image
+#     """
+#     def __init__(self, x : float, y : float, label : str, intensity: float = 1, **pars):
+#         """Initializes an Object
 
-        Args:
-            x (float): x position
-            y (float): y position
-            label (str): Object label
-            intensity(float, optional): relative intensity of the object, must be between 0 and 1. Defaults to 1
-            **pars: additional object parameters
-        """
-        self.x = x
-        self.y = y
-        self.label = label
-        self.intensity = intensity
-        self.parameters = pars
-class Ripple(Object):
-    """Shorthand for defining Ripple objects
-    """
-    def __init__(self, x, y, z, parameters):
-        super().__init__(x, y, "Ripple", parameters)
-        self.z = self.parameters["z"] = z
+#         Args:
+#             x (float): x position
+#             y (float): y position
+#             label (str): Object label
+#             intensity(float, optional): relative intensity of the object, must be between 0 and 1. Defaults to 1
+#             **pars: additional object parameters
+#         """
+#         self.x = x
+#         self.y = y
+#         self.label = label
+#         self.intensity = intensity
+#         self.parameters = pars
+# class Ripple(Object):
+#     """Shorthand for defining Ripple objects
+#     """
+#     def __init__(self, x, y, z, parameters):
+#         super().__init__(x, y, "Ripple", parameters)
+#         self.z = self.parameters["z"] = z
 
 
 def getRandom(
@@ -57,28 +57,34 @@ def getRandom(
         rng: np.random.Generator = np.random.default_rng(),
         max_tries: int = 10000
         ) -> pd.DataFrame:
-    """Generate a list of random objects with specified properties.
+    """
+    Generate a list of random objects with specified properties.
 
     Args:
-        parameters (List[Dict]): List of dictionaries containing object parameters
-            Each dictioary must contain the following keys:
-            - "label": Label of the object
-            - "n": Number of objects to be generated
-            Other keys are optional and can be used to specify the parameters of the object.
-            The parameters must be in the following format:
-            key: [distribution, [*params]]
-                - distribution: "uniform", "gaussian" or a callable function
-                - *params: Parameters for the distribution or function
-                - For "uniform", the parameters are the lower and upper bounds of the distribution
-                - For "gaussian", the parameters are the mean and standard deviation of the distribution
-                - For a callable function, the parameters are the arguments to be passed to the function
-        image_size (Union[int, Tuple[int, int]]): Size of the image frame. Either `int` for a square size frame or `(y: int,x: int)` for a rectangular image
+        parameters (Sequence[Dict[str, Union[Number, str, Sequence[Number]]]]): A list of dictionaries, each specifying the properties of the objects to generate.
+            Each dictionary may look like this:
+```python
+    {
+        "label": "object_type", # Mandatory, string label for the object type
+        "n": 10, # Mandatory, number of objects to generate, follows the same stle as the other parameters
+
+        # Other parameters can be defined as follows:
+        "parameter1": ["uniform", (min_value, max_value)],  # Uniform distribution
+        "parameter2": ["gaussian", (mean, std_dev)],  # Gaussian distribution
+        "parameter3": [my_function, (*args)],  # Custom function with arguments
+        "parameter4": 0.5,  # Fixed value
+
+        ...
+    }
+```
+        image_size (Union[int, Tuple[int, int]]): Size of the image frame. Can be an integer (square) or a tuple (height, width).
         distance (float, optional): Minimum distance between objects. Defaults to 0.
-        offset (float, optional): Offset from the image border. Defaults to 0.
-        rng (np.random.Generator, optional): Random number generator to be used. Defaults to `np.random.default_rng()`.
-        max_tries (int, optional): Maximum number of tries to place an object. Defaults to 10000.
+        offset (float, optional): Offset from the image border within which objects cannot be placed. Defaults to 0.
+        rng (np.random.Generator, optional): Random number generator for reproducibility. Defaults to np.random.default_rng().
+        max_tries (int, optional): Maximum number of attempts to place an object while respecting distance and offset. Defaults to 10000.
+
     Returns:
-       np.ndarray: List of objects with random positions and parameters
+        pd.DataFrame: A DataFrame containing the list of objects with random positions and parameters.
     """
     if isinstance(image_size, int):
         image_size = (image_size, image_size)

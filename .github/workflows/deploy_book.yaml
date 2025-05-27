@@ -31,7 +31,10 @@ jobs:
         cache: pip # Implicitly uses requirements.txt for cache key
 
     - name: Install dependencies
-      run: pip install jupyter-book
+      run: pip install jupyter-book pydoc-markdown
+
+    - name: Generate reference
+      run: "pydoc-markdown -I notebooks -m image_generator | tail -n +5 | sed --expression '1s/^/# Reference: /' > notebooks/ig_docs.md"
 
     # (optional) Cache your executed notebooks between runs
     # if you have config:
