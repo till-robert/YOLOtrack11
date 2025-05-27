@@ -13,7 +13,7 @@ Modules:
     dataset, loss, model, val, predict, utils, results, instance
 """
 
-__all__ = ["dataset", "loss", "model", "val", "predict", "utils", "results", "instance"]
+__all__ = ["dataset", "loss", "model", "val", "predict", "utils", "results", "instance", "exporter"]
 
 
 
@@ -134,3 +134,19 @@ class YOLOtrack11(YOLO):
         validator(model=self.model)
         self.metrics = validator.metrics
         return validator.metrics
+    def export(
+        self,
+        **kwargs,
+    ) -> str:
+        self._check_is_pytorch_model()
+        from .exporter import Exporter
+
+        custom = {
+            "imgsz": self.model.args["imgsz"],
+            "batch": 1,
+            "data": None,
+            "device": None,  # reset to avoid multi-GPU errors
+            "verbose": False,
+        }  # method defaults
+        args = {**self.overrides, **custom, **kwargs, "mode": "export"}  # highest priority args on the right
+        return Exporter(overrides=args, _callbacks=self.callbacks)(model=self.model)
