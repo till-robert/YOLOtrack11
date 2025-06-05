@@ -15,14 +15,16 @@ from .val import ZAxisValidator
 class ZAxisTrainer(yolo.pose.PoseTrainer):
 
 
-    def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks=None):
+    def __init__(self, cfg=DEFAULT_CFG, overrides={}, _callbacks=None):
         """Initialize a ZAxisTrainer object with given arguments."""
         if overrides is None:
             overrides = {}
-        super().__init__(cfg, overrides, _callbacks)
-        self.args.task = "zaxis"
-        # overrides["augment"] = False
+        overrides["task"] = "zaxis" # Set task to "zaxis"
 
+        # call the "grandparent" class constructor, which is DetectionTrainer
+        yolo.detect.DetectionTrainer.__init__(self,cfg, overrides, _callbacks)
+        # overrides["augment"] = False
+    
     def get_model(self, cfg=None, weights=None, verbose=True):
         """Return ZAxisModel initialized with specified config and weights."""
         model = ZAxisModel(cfg, ch=1, nc=self.data["nc"],kpt_shape=self.data["kpt_shape"],num_extra_parameters=self.data["num_extra_parameters"], verbose=verbose and RANK == -1)
@@ -30,39 +32,7 @@ class ZAxisTrainer(yolo.pose.PoseTrainer):
             model.load(weights)
 
         return model
-    
-    def set_model_attributes(self):
-        """Sets keypoints shape attribute of PoseModel."""
-        super().set_model_attributes()
-        self.model.num_extra_parameters = self.data["num_extra_parameters"]
 
-    def get_validator(self):
-        """Return an instance of ZAxisValidator for validation of YOLO model."""
-        self.loss_names = "box_loss", "cls_loss", "dfl_loss", "zaxis_loss","pose_loss","kobj_loss"
-        return ZAxisValidator(self.test_loader, save_dir=self.save_dir, args=copy(self.args))
-    def get_dataset(self):
-        """
-        Get train, val path from data dict if it exists.
-        Returns None if data format is not recognized.
-        """
-        try:
-            if self.args.task == "classify":
-                data = check_cls_dataset(self.args.data)
-            elif self.args.data.split(".")[-1] in {"yaml", "yml"} or self.args.task in {
-                "detect",
-                "segment",
-                "pose",
-                "obb",
-                "zaxis",
-            }:
-                data = check_det_dataset(self.args.data)
-                if "yaml_file" in data:
-                    self.args.data = data["yaml_file"]  # for validating 'yolo train data=url.zip' usage
-        except Exception as e:
-            raise RuntimeError(emojis(f"Dataset '{clean_url(self.args.data)}' error ❌ {e}")) from e
-        self.data = data
-        return data["train"], data.get("val") or data.get("test")
-    
     def build_dataset(self, img_path, mode="train", batch=None):
         """
         Build YOLO Dataset.
@@ -74,7 +44,6 @@ class ZAxisTrainer(yolo.pose.PoseTrainer):
         """
         gs = max(int(de_parallel(self.model).stride.max() if self.model else 0), 32)
         cfg  = self.args
-        rect = False
         
         return YOLOtrackDataset(
             img_path=img_path,
@@ -82,7 +51,7 @@ class ZAxisTrainer(yolo.pose.PoseTrainer):
             batch_size=batch,
             augment=cfg.augment,#mode == "train",  # augmentation
             hyp=cfg,  # TODO: probably add a get_hyps_from_cfg function
-            rect=cfg.rect or rect,  # rectangular batches
+            rect=cfg.rect,  # rectangular batches
             cache=cfg.cache or None,
             single_cls=cfg.single_cls or False,
             stride=int(gs),
@@ -93,11 +62,23 @@ class ZAxisTrainer(yolo.pose.PoseTrainer):
             data=self.data,
             fraction=cfg.fraction if mode == "train" else 1.0,
         )
+
+
     
+    def set_model_attributes(self):
+        """Sets keypoints shape attribute of PoseModel."""
+        super().set_model_attributes()
+        self.model.num_extra_parameters = self.data["num_extra_parameters"]
+
+    def get_validator(self):
+        """Return an instance of ZAxisValidator for validation of YOLO model."""
+        self.loss_names = "box_loss", "cls_loss", "dfl_loss", "zaxis_loss","pose_loss","kobj_loss"
+        return ZAxisValidator(self.test_loader, save_dir=self.save_dir, args=copy(self.args))
+
     def preprocess_batch(self, batch):
         """Preprocesses a batch of images by scaling and converting to float."""
         if(batch["img"].type() == "torch.UInt16Tensor"):
-                batch["img"] = batch["img"].to(self.device, non_blocking=True).float() / 65535
+                batch["img"] = batch["img"].to(self.device, non_blocking=True).float() / (2**16-1)
         else:
             batch["img"] = batch["img"].to(self.device, non_blocking=True).float() / 255
         if self.args.multi_scale:

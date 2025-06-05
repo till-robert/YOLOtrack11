@@ -8,6 +8,7 @@ chapters:
 - file: snr
 - file: ImageGenerator
 - file: crlb
+- file: spots
 - file: zaxis_val
 - file: zaxis_test
 - file: analyze_amplitudes

@@ -61,6 +61,10 @@ class RandomPerspective(ultralytics.data.augment.RandomPerspective):
         return labels
 
 class LetterBox(ultralytics.data.augment.LetterBox):
+    def __init__(self, new_shape=(640, 640), auto=False, scaleFill=False, scaleup=True, center=True, stride=32, background_value=2e4):
+        super().__init__(new_shape, auto, scaleFill, scaleup, center, stride)
+        self.background_value = background_value  # padding value
+
     def __call__(self, labels=None, image=None):
         if labels is None:
             labels = {}
@@ -81,7 +85,7 @@ class LetterBox(ultralytics.data.augment.LetterBox):
         dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
         if self.auto:  # minimum rectangle
             dw, dh = np.mod(dw, self.stride), np.mod(dh, self.stride)  # wh padding
-        elif self.scaleFill:  # stretch
+        elif self.scale_fill:  # stretch
             dw, dh = 0.0, 0.0
             new_unpad = (new_shape[1], new_shape[0])
             ratio = new_shape[1] / shape[1], new_shape[0] / shape[0]  # width, height ratios
@@ -94,7 +98,7 @@ class LetterBox(ultralytics.data.augment.LetterBox):
             img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
         top, bottom = int(round(dh - 0.1)) if self.center else 0, int(round(dh + 0.1))
         left, right = int(round(dw - 0.1)) if self.center else 0, int(round(dw + 0.1))
-        value = 2e4 if img.dtype == np.uint16 else 128.
+        value = self.background_value
         img = cv2.copyMakeBorder(
             img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(value,)*3
         )  # add border

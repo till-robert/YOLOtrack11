@@ -42,9 +42,7 @@ class ZAxisValidator(PoseValidator):
         self.args.task = "zaxis"
         self.metrics = ZAxisMetrics(save_dir=self.save_dir, plot=True, on_plot=self.on_plot)
         self.physical_scale = args["physical_scale"] if "physical_scale" in args else (1,1,1)
-        self.z_corr = args.get("z_corr", self.args.get("physical_scale", [1,1,1]))
-        if(self.z_corr):
-            self.downsampled_reference = torch.tensor(np.load("data_gen/ripples_downsampled.npy")/10000, device=self.device)-2
+        
 
 
 
@@ -59,8 +57,7 @@ class ZAxisValidator(PoseValidator):
         self.stats["z_pairs"] = []
         self.stats["kpt_pairs"] = []
         del self.stats["tp_p"]
-        if(self.z_corr):
-            self.downsampled_reference=self.downsampled_reference.to(self.device)
+        
 
 
     def postprocess(self, preds):
@@ -210,7 +207,7 @@ class ZAxisValidator(PoseValidator):
             stat["conf"] = predn[:, 4]
             stat["pred_cls"] = predn[:, 5]
 
-            pred_z = self.z_correlation(predn[:,:4],pbatch.pop("img"), pbatch["ori_shape"], pbatch["ratio_pad"]) if self.z_corr else predn[:,6].squeeze(-1)
+            pred_z = predn[:,6].squeeze(-1)
 
             # Evaluate
             if nl:
@@ -243,62 +240,6 @@ class ZAxisValidator(PoseValidator):
                     self.save_dir / "labels" / f'{Path(batch["im_file"][si]).stem}.txt',
                 )
     
-    def z_correlation(self,bbox,img,ori_shape,rpad):
-        x1,y1,x2,y2 = bbox.T
-        w,h = x2-x1,y2-y1
-
-        mask = x1==0
-        x1[mask]=x1[mask]-h[mask]-w[mask]
-        w[mask] = h[mask]
-
-        mask = y1==0
-        y1[mask]=y1[mask]-w[mask]-h[mask]
-        h[mask] = w[mask]
-
-        mask = x2 >= 511
-        x2[mask]=x2[mask]+h[mask]-w[mask]
-        w[mask] = h[mask]
-
-        mask = y2 >= 511
-        y2[mask]=y2[mask]+w[mask]-h[mask]
-        h[mask] = w[mask]
-
-        x,y = 0.5*(x1+x2),0.5*(y1+y2)
-        # print(x,y,w,h)
-        # plt.figure(1)
-        # rect = Rectangle((x1,y1),w,h, linewidth=1, edgecolor="blue", facecolor='none')
-        # plt.scatter(x,y,c="r",marker="x")
-        # plt.text(*rect.get_xy(),f"{i},z={z:.3f}")
-        # plt.gca().add_patch(rect)
-        # plt.figure(2)
-        # plt.subplot(1,len(res),i+1)
-        size=128
-        padding = 200
-        extra_padding = padding-max(rpad[1])
-        y = torch.round(y).type(torch.int).clamp(-size,511+size)
-        x = torch.round(x).type(torch.int).clamp(-size,511+size)
-        padded_image = torch.nn.functional.pad(img,(extra_padding,)*4,mode="constant", value=0.5)
-        captures = torch.cat([padded_image[:,y[i]+padding-size//2:y[i]+padding+size//2,x[i]+padding-size//2:x[i]+padding+size//2].unsqueeze(0)-0.5 for i in range(len(x))],0)
-
-        v = (torch.max(w,h)*(2)-55).unsqueeze(0)
-
-        z  = torch.cat([(-v/0.21)+761,(v/0.21)+761], 0).round().type(torch.int).clamp(0,len(self.downsampled_reference)-1)
-
-        correlations = self.downsampled_reference[z]*captures[:,0]
-        return z[correlations.sum((-1,-2)).argmax(0)].diag()/1568
-
-    # def plot_predictions(self, batch, preds, ni):
-    #     """Plots predicted bounding boxes on input images and saves the result."""
-    #     batch_id, class_id, box,z, conf = output_to_z_target(preds, max_det=self.args.max_det)
-    #     plot_images( #TODO: use custom plotting function
-    #         batch["img"],
-    #         batch_id, class_id, box, conf,
-    #         paths=batch["im_file"],
-    #         fname=self.save_dir / f"val_batch{ni}_pred.jpg",
-    #         names=self.names,
-    #         on_plot=self.on_plot,
-    #         z=z
-    #     )  # pred
     def plot_val_samples(self, batch, ni):
         """Plot validation image samples."""
         plot_images( #TODO: use custom plotting function
