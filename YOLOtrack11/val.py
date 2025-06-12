@@ -325,10 +325,10 @@ class ZAxisValidator(PoseValidator):
             fraction=self.args.fraction if mode == "train" else 1.0,
         )
     
-    def get_dataloader(self, dataset_path, batch_size):
-        """Construct and return dataloader."""
-        dataset = self.build_dataset(dataset_path, batch=batch_size, mode="val")
-        return build_dataloader(dataset, batch_size, self.args.workers, shuffle=False, rank=-1)  # return dataloader
+    # def get_dataloader(self, dataset_path, batch_size):
+    #     """Construct and return dataloader."""
+    #     dataset = self.build_dataset(dataset_path, batch=batch_size, mode="val")
+    #     return build_dataloader(dataset, batch_size, self.args.workers, shuffle=False, rank=-1)  # return dataloader
     # @smart_inference_mode()
     # def __call__(self, trainer=None, model=None):
     #     """Executes validation process, running inference on dataloader and computing performance metrics."""

@@ -53,6 +53,7 @@ def getRandom(
         parameters: Sequence[Dict[str, Union[Number, str, Sequence[Number]]]],
         image_size: Union[int, Tuple[int, int]],
         distance: float = 0,
+        distance_consider_object_size: bool = False,
         offset: float = 0,
         rng: np.random.Generator = np.random.default_rng(),
         max_tries: int = 10000
@@ -69,16 +70,17 @@ def getRandom(
         "n": ["uniform", (min_value, max_value)], # Mandatory, number of objects to generate, follows the same stle as the other parameters
 
         # Other parameters can be defined as follows:
-        "sone-parameter1": ["uniform", (min_value, max_value)],  # Uniform distribution
-        "sone-parameter2": ["gaussian", (mean, std_dev)],  # Gaussian distribution
-        "sone-parameter3": [my_function, (*args)],  # Custom function with arguments
-        "sone-parameter4": 0.5,  # Fixed value
+        "some-parameter1": ["uniform", (min_value, max_value)],  # Uniform distribution
+        "some-parameter2": ["gaussian", (mean, std_dev)],  # Gaussian distribution
+        "some-parameter3": [my_function, (*args)],  # Custom function with arguments
+        "some-parameter4": 0.5,  # Fixed value
 
         ...
     }
 ```
         image_size (Union[int, Tuple[int, int]]): Size of the image frame. Can be an integer (square) or a tuple (height, width).
         distance (float, optional): Minimum distance between objects. Defaults to 0.
+        distance_consider_object_size (bool, optional): Include the object size (mean of obj. width and height) into the distance calculation. Defaults to False.
         offset (float, optional): Offset from the image border within which objects cannot be placed. Defaults to 0.
         rng (np.random.Generator, optional): Random number generator for reproducibility. Defaults to np.random.default_rng().
         max_tries (int, optional): Maximum number of attempts to place an object while respecting distance and offset. Defaults to 10000.
@@ -107,6 +109,8 @@ def getRandom(
 
 
     points = np.zeros((sum(n_list),2))
+    obj_sizes  = np.zeros((sum(n_list)))
+    
     expanded_index = chain(*[repeat(i, n) for i, n in enumerate(n_list)])
     objects = []
     for i, label_idx in enumerate(expanded_index):
@@ -115,10 +119,17 @@ def getRandom(
             new_point[1]*=(image_size[0] - 2*offset) + offset
             new_point[0]*=(image_size[1] - 2*offset) + offset
 
-            if((i == 0 or np.all(((points[:i]-new_point)**2).sum(axis=1)>=distance**2))): #found a new point!
+            params = _chooseParameters(parameters[label_idx], rng, ignorekeys=["n"])
+            w,h = _get_width_height(params)
+            if distance_consider_object_size:
+                new_obj_size = np.mean((w,h))
+                distances_sq = ((points[:i]-new_point)**2).sum(axis=1)-obj_sizes[:i]**2-new_obj_size**2
+            else:
+                distances_sq = ((points[:i]-new_point)**2).sum(axis=1)
+
+            if((i == 0 or np.all(distances_sq>=distance**2))): #found a new point!
                 points[i] = new_point
-                params = _chooseParameters(parameters[label_idx], rng, ignorekeys=["n"])
-                w,h = _get_width_height(params)
+                if distance_consider_object_size: obj_sizes[i] = new_obj_size
                 dic = {"label": params["label"], "x":new_point[0], "y":new_point[1], "w": w, "h": h}
                 del params["label"] #remove label from parameters, since it is already in the dictionary
                 objects.append({**dic, **params})
@@ -128,6 +139,7 @@ def getRandom(
             raise RuntimeError(
                 f"Couldn't place object no. {i} after maxtries={max_tries}. Perhaps you chose a `distance` or `offset` that is too large or you want to place too many objects. Try increasing `max_tries` or decreasing `distance` and `offset`.")
             break
+    
 
       
     objects = pd.DataFrame(objects)
