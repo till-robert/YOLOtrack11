@@ -1,5 +1,4 @@
-from YOLOtrack11 import YOLOtrack11
-from os import remove
+
 # try:
 #     remove("data_gen/Dataset/labels/train.cache")
 #     remove("data_gen/Dataset/labels/val.cache")
@@ -21,8 +20,7 @@ from os import remove
 
 # model.add_callback("on_pretrain_routine_end", on_pretrain_routine_end)
 
+from YOLOtrack11 import YOLOtrack11
 model = YOLOtrack11("yolo11n-zaxis.yaml")
-results = model.train(data="datasets/ripples.yaml", imgsz=(640,540), background_level=2e4)#, z=5,freeze=22,box=0,cls=0,dfl=0,pose=0)
-print("test")
-
-    
+results = model.train(data="datasets/ripples_no_overlap_fast.yaml", imgsz=(640,540), background_level=2e4, epochs=50)#, z=5,freeze=22,box=0,cls=0,dfl=0,pose=0)
+model.save("yolo11n_ripples.pt")

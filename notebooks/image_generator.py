@@ -114,15 +114,15 @@ def getRandom(
     expanded_index = chain(*[repeat(i, n) for i, n in enumerate(n_list)])
     objects = []
     for i, label_idx in enumerate(expanded_index):
+        params = _chooseParameters(parameters[label_idx], rng, ignorekeys=["n"])
+        w,h = _get_width_height(params)
+        new_obj_size = np.mean((w,h))
         for j in range(max_tries):
             new_point = rng.random(2)
             new_point[1]*=(image_size[0] - 2*offset) + offset
             new_point[0]*=(image_size[1] - 2*offset) + offset
 
-            params = _chooseParameters(parameters[label_idx], rng, ignorekeys=["n"])
-            w,h = _get_width_height(params)
             if distance_consider_object_size:
-                new_obj_size = np.mean((w,h))
                 distances_sq = ((points[:i]-new_point)**2).sum(axis=1)-obj_sizes[:i]**2-new_obj_size**2
             else:
                 distances_sq = ((points[:i]-new_point)**2).sum(axis=1)

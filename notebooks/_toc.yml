@@ -7,9 +7,10 @@ chapters:
 - file: refstack
 - file: snr
 - file: ImageGenerator
+- file: model
 - file: crlb
 - file: spots
-- file: zaxis_val
-- file: zaxis_test
+- file: ripples
+# - file: zaxis_test
 - file: analyze_amplitudes
 - file: ig_docs

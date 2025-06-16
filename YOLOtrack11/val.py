@@ -511,6 +511,8 @@ class ZAxisMetrics(SimpleClass):
         nan_mask = [~np.any(np.isnan(z_pairs[:,i]),axis=1) for i in range(self.num_iou_levels)]
         self.z_pairs = [z_pairs[:,i][nan_mask[i]].T for i in range(self.num_iou_levels)] #filter out nans
         self.kpt_pairs = [kpt_pairs[:,i][nan_mask[i]].T for i in range(self.num_iou_levels)] #filter out nans
+        # self.z_pairs = z_pairs.transpose(1,2,0)
+        # self.kpt_pairs = kpt_pairs.transpose(1,2,3,0)
 
     @property
     def keys(self):
@@ -520,12 +522,9 @@ class ZAxisMetrics(SimpleClass):
     def mean_results(self):
         """Calculate mean of detected objects & return precision, recall, mAP50, and mAP50-95."""
         results = self.box.mean_results()
-        if self.z_pairs and self.kpt_pairs is not None:
-            results.append(self.z_rms[4])
-            results.append(self.xy_rms[4])
-        else:
-            results.append(0)
-            results.append(0)
+        results.append(self.z_rms[4])
+        results.append(self.xy_rms[4])
+
         return results
 
     # def class_result(self, i):
