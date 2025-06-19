@@ -68,6 +68,8 @@ class ZAxisTrainer(yolo.pose.PoseTrainer):
     def set_model_attributes(self):
         """Sets keypoints shape attribute of PoseModel."""
         super().set_model_attributes()
+        self.model.ne = self.data["num_extra_parameters"]
+        self.model.extra_param_names = self.data["extra_param_names"]
         self.model.num_extra_parameters = self.data["num_extra_parameters"]
 
     def get_validator(self):
@@ -78,7 +80,8 @@ class ZAxisTrainer(yolo.pose.PoseTrainer):
     def preprocess_batch(self, batch):
         """Preprocesses a batch of images by scaling and converting to float."""
         if(batch["img"].type() == "torch.UInt16Tensor"):
-                batch["img"] = batch["img"].to(self.device, non_blocking=True).float() / (2**16-1)
+                
+                batch["img"] = (batch["img"].to(self.device, non_blocking=True).float()-self.args.level) / self.args.window
         else:
             batch["img"] = batch["img"].to(self.device, non_blocking=True).float() / 255
         if self.args.multi_scale:

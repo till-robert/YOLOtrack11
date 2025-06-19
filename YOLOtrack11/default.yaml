@@ -129,4 +129,6 @@ tracker: botsort.yaml # (str) tracker type, choices=[botsort.yaml, bytetrack.yam
 
 
 # custom zaxis settings ---------------------------------------------------------------------------------------------------
-background_level: 20000 # (float) background level for images
+background: 20000 # background value used for image padding
+level: 0 # normalization level
+window: 65535 # normalization window

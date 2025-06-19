@@ -254,7 +254,7 @@ class YOLOtrackDataset(YOLODataset):
             hyp.mixup = hyp.mixup if self.augment and not self.rect else 0.0
             transforms = v8_transforms(self, self.imgsz, hyp)
         else:
-            transforms = Compose([LetterBox(new_shape=(self.imgsz, self.imgsz), scaleup=False, background_value=hyp.background_level)])
+            transforms = Compose([LetterBox(new_shape=(self.imgsz, self.imgsz), scaleup=False, background_value=hyp.background)])
         transforms.append(
             Format(
                 bbox_format="xywh",
@@ -312,14 +312,14 @@ class YOLOtrackDataset(YOLODataset):
             for i, k in enumerate(keys):
                 value = values[i]
                 if k == "img":
-                    value = torch.stack(value, 0)
+                    value = torch.stack(value, 0).contiguous()
                 if k in {"masks", "keypoints", "bboxes", "cls","extra_parameters", "segments", "obb"}:
-                    value = torch.cat(value, 0)
+                    value = torch.cat(value, 0).contiguous()
                 new_batch[k] = value
             new_batch["batch_idx"] = list(new_batch["batch_idx"])
             for i in range(len(new_batch["batch_idx"])):
                 new_batch["batch_idx"][i] += i  # add target image index for build_targets()
-            new_batch["batch_idx"] = torch.cat(new_batch["batch_idx"], 0)
+            new_batch["batch_idx"] = torch.cat(new_batch["batch_idx"], 0).contiguous()
             return new_batch
         except Exception as e:
             print("Collate failed on batch:", batch)

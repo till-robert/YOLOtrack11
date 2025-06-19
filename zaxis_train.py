@@ -22,5 +22,5 @@
 
 from YOLOtrack11 import YOLOtrack11
 model = YOLOtrack11("yolo11n-zaxis.yaml")
-results = model.train(data="datasets/ripples_no_overlap_fast.yaml", imgsz=(640,540), background_level=2e4, epochs=50)#, z=5,freeze=22,box=0,cls=0,dfl=0,pose=0)
-model.save("yolo11n_ripples.pt")
+results = model.train(data="datasets/spots.yaml", imgsz=(640,540),epochs=50,z=0)#, z=5,freeze=22,box=0,cls=0,dfl=0,pose=0)
+# model.save("yolo11n_ripples.pt")

@@ -52,7 +52,7 @@ class ZAxisPredictor(PosePredictor):
             self.imgsz,
             auto=same_shapes and (self.model.pt or (getattr(self.model, "dynamic", False) and not self.model.imx)),
             stride=self.model.stride,
-            background_value=float(self.args.background_level),
+            background_value=float(self.args.background),
         )
         return [letterbox(image=x) for x in im]
 
@@ -75,7 +75,7 @@ class ZAxisPredictor(PosePredictor):
         im = im.to(self.device)
         im = im.half() if self.model.fp16 else im.float()  # uint8 to fp16/32
         if not_tensor:
-            if is_16bit : im /= 2**16-1
+            if is_16bit : im = (im - self.args.level) / self.args.window
             else: im /= 255  # 0 - 255 to 0.0 - 1.0
         return im
 
@@ -101,7 +101,7 @@ class ZAxisPredictor(PosePredictor):
             npar = self.model.model.num_extra_parameters
             pred_kpts = pred[:, 6+npar:].view(len(pred), *self.model.kpt_shape) if len(pred) else pred[:, 6+npar:]
             pred_kpts = scale_coords(img.shape[2:], pred_kpts, orig_img.shape)
-            results.append(Results(orig_img, path=img_path, names=self.model.names, boxes=pred[:, :6], zaxis=pred[:, 6:6+npar], keypoints=pred_kpts))
+            results.append(Results(orig_img, path=img_path, names=self.model.names, extra_param_names=self.model.model.extra_param_names if "extra_param_names" in self.__dict__ else ["z","(unused)"], boxes=pred[:, :6], zaxis=pred[:, 6:6+npar], keypoints=pred_kpts))
         return results
     def setup_source(self, source):
         """Sets up source and inference mode."""

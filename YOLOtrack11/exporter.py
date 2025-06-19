@@ -1,5 +1,5 @@
 from ultralytics.engine import exporter as ul_exporter
-from ultralytics.engine.exporter import export_formats, select_device, colorstr, LOGGER, file_size
+from ultralytics.engine.exporter import export_formats, select_device, colorstr, LOGGER, file_size, try_export
 from ultralytics.utils import  __version__, LINUX, DEFAULT_CFG
 from ultralytics.utils.checks import check_imgsz
 import time 
@@ -7,13 +7,30 @@ import warnings
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
-
+from ultralytics.utils import (
+    ARM64,
+    DEFAULT_CFG,
+    IS_JETSON,
+    LINUX,
+    LOGGER,
+    MACOS,
+    PYTHON_VERSION,
+    ROOT,
+    WINDOWS,
+    __version__,
+    callbacks,
+    colorstr,
+    get_default_args,
+    yaml_save,
+)
 import torch
-
+import gc
+import json
 from ultralytics.cfg import TASK2DATA
 from ultralytics.nn.autobackend import check_class_names, default_class_names
 from ultralytics.nn.modules import C2f, Classify, Detect, RTDETRDecoder
 from ultralytics.nn.tasks import WorldModel
+from ultralytics.utils.checks import check_imgsz, check_is_path_safe, check_requirements, check_version
 
 class Exporter(ul_exporter.Exporter):
     def __call__(self, model=None) -> str:
@@ -237,3 +254,150 @@ class Exporter(ul_exporter.Exporter):
 
         self.run_callbacks("on_export_end")
         return f  # return list of exported files/dirs
+    @try_export
+    def export_engine(self, dla=None, prefix=colorstr("TensorRT:")):
+        """YOLO TensorRT export https://developer.nvidia.com/tensorrt."""
+        assert self.im.device.type != "cpu", "export running on CPU but must be on GPU, i.e. use 'device=0'"
+        f_onnx, _ = self.export_onnx()  # run before TRT import https://github.com/ultralytics/ultralytics/issues/7016
+
+        try:
+            import tensorrt as trt  # noqa
+        except ImportError:
+            if LINUX:
+                check_requirements("tensorrt>7.0.0,!=10.1.0")
+            import tensorrt as trt  # noqa
+        check_version(trt.__version__, ">=7.0.0", hard=True)
+        check_version(trt.__version__, "!=10.1.0", msg="https://github.com/ultralytics/ultralytics/pull/14239")
+
+        # Setup and checks
+        LOGGER.info(f"\n{prefix} starting export with TensorRT {trt.__version__}...")
+        is_trt10 = int(trt.__version__.split(".")[0]) >= 10  # is TensorRT >= 10
+        assert Path(f_onnx).exists(), f"failed to export ONNX file: {f_onnx}"
+        f = self.file.with_suffix(".engine")  # TensorRT engine file
+        logger = trt.Logger(trt.Logger.INFO)
+        if self.args.verbose:
+            logger.min_severity = trt.Logger.Severity.VERBOSE
+
+        # Engine builder
+        builder = trt.Builder(logger)
+        config = builder.create_builder_config()
+        workspace = int(self.args.workspace * (1 << 30)) if self.args.workspace is not None else 0
+        if is_trt10 and workspace > 0:
+            config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, workspace)
+        elif workspace > 0 and not is_trt10:  # TensorRT versions 7, 8
+            config.max_workspace_size = workspace
+        flag = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+        network = builder.create_network(flag)
+        half = builder.platform_has_fast_fp16 and self.args.half
+        int8 = builder.platform_has_fast_int8 and self.args.int8
+
+        # Optionally switch to DLA if enabled
+        if dla is not None:
+            if not IS_JETSON:
+                raise ValueError("DLA is only available on NVIDIA Jetson devices")
+            LOGGER.info(f"{prefix} enabling DLA on core {dla}...")
+            if not self.args.half and not self.args.int8:
+                raise ValueError(
+                    "DLA requires either 'half=True' (FP16) or 'int8=True' (INT8) to be enabled. Please enable one of them and try again."
+                )
+            config.default_device_type = trt.DeviceType.DLA
+            config.DLA_core = int(dla)
+            config.set_flag(trt.BuilderFlag.GPU_FALLBACK)
+
+        # Read ONNX file
+        parser = trt.OnnxParser(network, logger)
+        if not parser.parse_from_file(f_onnx):
+            raise RuntimeError(f"failed to load ONNX file: {f_onnx}")
+
+        # Network inputs
+        inputs = [network.get_input(i) for i in range(network.num_inputs)]
+        outputs = [network.get_output(i) for i in range(network.num_outputs)]
+        for inp in inputs:
+            LOGGER.info(f'{prefix} input "{inp.name}" with shape{inp.shape} {inp.dtype}')
+        for out in outputs:
+            LOGGER.info(f'{prefix} output "{out.name}" with shape{out.shape} {out.dtype}')
+
+        if self.args.dynamic:
+            shape = self.im.shape
+            if shape[0] <= 1:
+                LOGGER.warning(f"{prefix} WARNING ⚠️ 'dynamic=True' model requires max batch size, i.e. 'batch=16'")
+            profile = builder.create_optimization_profile()
+            min_shape = (1, shape[1], 32, 32)  # minimum input shape
+            max_shape = (*shape[:2], *(int(max(1, workspace) * d) for d in shape[2:]))  # max input shape
+            for inp in inputs:
+                profile.set_shape(inp.name, min=min_shape, opt=shape, max=max_shape)
+            config.add_optimization_profile(profile)
+
+        LOGGER.info(f"{prefix} building {'INT8' if int8 else 'FP' + ('16' if half else '32')} engine as {f}")
+        if int8:
+            config.set_flag(trt.BuilderFlag.INT8)
+            config.set_calibration_profile(profile)
+            config.profiling_verbosity = trt.ProfilingVerbosity.DETAILED
+
+            class EngineCalibrator(trt.IInt8Calibrator):
+                def __init__(
+                    self,
+                    dataset,  # ultralytics.data.build.InfiniteDataLoader
+                    batch: int,
+                    cache: str = "",
+                ) -> None:
+                    trt.IInt8Calibrator.__init__(self)
+                    self.dataset = dataset
+                    self.data_iter = iter(dataset)
+                    self.algo = trt.CalibrationAlgoType.ENTROPY_CALIBRATION_2
+                    self.batch = batch
+                    self.cache = Path(cache)
+
+                def get_algorithm(self) -> trt.CalibrationAlgoType:
+                    """Get the calibration algorithm to use."""
+                    return self.algo
+
+                def get_batch_size(self) -> int:
+                    """Get the batch size to use for calibration."""
+                    return self.batch or 1
+
+                def get_batch(self, names) -> list:
+                    """Get the next batch to use for calibration, as a list of device memory pointers."""
+                    try:
+                        im0s = next(self.data_iter)["img"] / 255.0
+                        im0s = im0s.to("cuda") if im0s.device.type == "cpu" else im0s
+                        return [int(im0s.data_ptr())]
+                    except StopIteration:
+                        # Return [] or None, signal to TensorRT there is no calibration data remaining
+                        return None
+
+                def read_calibration_cache(self) -> bytes:
+                    """Use existing cache instead of calibrating again, otherwise, implicitly return None."""
+                    if self.cache.exists() and self.cache.suffix == ".cache":
+                        return self.cache.read_bytes()
+
+                def write_calibration_cache(self, cache) -> None:
+                    """Write calibration cache to disk."""
+                    _ = self.cache.write_bytes(cache)
+
+            # Load dataset w/ builder (for batching) and calibrate
+            config.int8_calibrator = EngineCalibrator(
+                dataset=self.get_int8_calibration_dataloader(prefix),
+                batch=2 * self.args.batch,  # TensorRT INT8 calibration should use 2x batch size
+                cache=str(self.file.with_suffix(".cache")),
+            )
+
+        elif half:
+            config.set_flag(trt.BuilderFlag.FP16)
+
+        # Free CUDA memory
+        del self.model
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        # Write file
+        build = builder.build_serialized_network if is_trt10 else builder.build_engine
+        with build(network, config) as engine, open(f, "wb") as t:
+            # # Metadata
+            # meta = json.dumps(self.metadata)
+            # t.write(len(meta).to_bytes(4, byteorder="little", signed=True))
+            # t.write(meta.encode())
+            # Model
+            t.write(engine if is_trt10 else engine.serialize())
+
+        return f, None

@@ -189,3 +189,4 @@ ultralytics/
 _build/**/*
 _toc.yml.save
 build_book.sh
+notebooks/torch/**/*

@@ -275,7 +275,7 @@ class ZAxisValidator(PoseValidator):
         is_16bit = batch["img"].dtype == torch.uint16
         batch["img"] = (batch["img"].clamp(0,65504.).half() if self.args.half else batch["img"].float()) #unsafe conversion
         if is_16bit:
-            batch["img"] /= 2**16-1
+            batch["img"] = (batch["img"]-self.args.level)/self.args.window
         else:
             batch["img"] /= 255
         for k in ["batch_idx", "cls", "bboxes","extra_parameters","keypoints"]:
