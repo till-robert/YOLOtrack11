@@ -4,14 +4,14 @@
 format: jb-book
 root: intro
 chapters:
-- file: refstack
-- file: snr
-- file: ImageGenerator
 - file: model
 - file: crlb
+- file: snr
 - file: spots
 - file: ripples
 - file: yundon
+# - file: ImageGenerator
 # - file: zaxis_test
+- file: refstack
 - file: analyze_amplitudes
 - file: ig_docs

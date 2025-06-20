@@ -190,3 +190,4 @@ _build/**/*
 _toc.yml.save
 build_book.sh
 notebooks/torch/**/*
+radially_averaged_refstack.tif
