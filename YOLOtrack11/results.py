@@ -105,11 +105,12 @@ class ZAxisResults(Results):
         bboxes = boxes.xywh.numpy()
         cls = boxes.cls.numpy()
         conf = boxes.conf.numpy()
+        zaxis = self.zaxis.cpu().data.numpy()
         
         ax.imshow(self.orig_img,cmap="grey",vmin=vmin,vmax=vmax)
 
 
-        for bbox,kpt,c in zip(bboxes,kpts,conf):
+        for bbox,kpt,c,z in zip(bboxes,kpts,conf,zaxis):
             if(bbox is not None):
                 x,y,w,h = bbox
                 rect = Rectangle((x-0.5*w,y-0.5*h),h,w, linewidth=1, edgecolor="yellow", facecolor='none')
@@ -123,7 +124,7 @@ class ZAxisResults(Results):
                 tx-=50
             circle = Circle(kpt.squeeze(),1, facecolor="red",edgecolor="red")
             ax.add_patch(circle)
-            ax.text(tx,ty, f"{c*100:.0f}%", fontsize="small",bbox=dict(facecolor='white', alpha=0.5,))
+            ax.text(tx,ty, f"{c*100:.0f}%, z = {z[0]:.2f}um", fontsize="small",bbox=dict(facecolor='white', alpha=0.5,))
 
         # Retrieve a view on the renderer buffer
         ax.set_xlim(0,figw)

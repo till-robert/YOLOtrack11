@@ -306,7 +306,7 @@ class ZAxisValidator(PoseValidator):
         """
         # return build_yolo_dataset(self.args, img_path, batch, self.data, mode=mode, stride=self.stride)
 
-
+        print("image size:", self.args.imgsz)
         return YOLOtrackDataset(
             img_path=img_path,
             imgsz=self.args.imgsz,
