@@ -22,5 +22,5 @@
 
 from YOLOtrack11 import YOLOtrack11
 model = YOLOtrack11("yolo11n-zaxis.yaml")
-results = model.train(data="datasets/yundon.yaml", imgsz=(640,540),epochs=50, workers=0)#, z=5,freeze=22,box=0,cls=0,dfl=0,pose=0)
-# model.save("yolo11n_ripples.pt")
+results = model.train(data="datasets/ripples256.yaml",epochs=50, workers=0, imgsz=1024)
+model.save("notebooks/yolo11n-ripples256.pt")

@@ -4,10 +4,10 @@ extension of ultralytics' YOLOv11 at https://github.com/ultralytics/ultralytics 
 
 ### Requirements
 
-* ultralytics
+* ultralytics version 8.3.51
 
 ```
-pip install ultralytics
+pip install ultralytics=8.3.51
 ```
 
 ### How to use

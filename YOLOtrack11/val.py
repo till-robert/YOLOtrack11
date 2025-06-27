@@ -54,8 +54,7 @@ class ZAxisValidator(PoseValidator):
         self.ne = self.data["num_extra_parameters"]
         # self.stats["pred_z"] = []
         # self.stats["target_z"] = []
-        self.stats["z_pairs"] = []
-        self.stats["kpt_pairs"] = []
+        self.stats["xyz_pairs"] = []
         del self.stats["tp_p"]
         
 
@@ -181,8 +180,7 @@ class ZAxisValidator(PoseValidator):
             stat = dict(
                 conf=torch.zeros(0, device=self.device),
                 pred_cls=torch.zeros(0, device=self.device),
-                z_pairs=torch.zeros(len(batch["cls"]), self.niou,2, device=self.device),
-                kpt_pairs=torch.zeros(len(batch["keypoints"]), self.niou,2,2, device=self.device),
+                xyz_pairs=torch.zeros(len(batch["keypoints"]),2,3, device=self.device),
                 tp=torch.zeros(npr, self.niou, dtype=torch.bool, device=self.device),
                 # tp_p=torch.zeros(npr, self.niou, dtype=torch.bool, device=self.device),
             )
@@ -211,13 +209,41 @@ class ZAxisValidator(PoseValidator):
 
             # Evaluate
             if nl:
-                stat["tp"],gt_pred_matcher = self._process_batch(predn, bbox, cls)
-                matched = (pred_z*gt_pred_matcher).sum(axis=2) #z predictions matched to ground truth for different iou values, unmatched are 0
-                matched_kpt = (gt_pred_matcher.unsqueeze(-1)*pred_kpts.squeeze(1)).sum(axis=2) #kpt predictions matched to ground truth for different iou values, unmatched are 0
-                matched[~gt_pred_matcher.sum(axis=2).type(torch.bool)] = torch.nan #set unmatched detections to nan
-                matched_kpt[~gt_pred_matcher.sum(axis=2).type(torch.bool)] = torch.nan #set unmatched detections to nan
-                stat["z_pairs"] = torch.cat([gt_z.expand((len(matched),-1)).unsqueeze(-1),matched.unsqueeze(-1)],2).transpose(0,1) #paired up z-values
-                stat["kpt_pairs"] = torch.cat([gt_kpts.transpose(0,1).expand((len(matched),-1,-1)).unsqueeze(-2),matched_kpt.unsqueeze(-2)],-2).transpose(0,1) #paired up kpt-values
+                stat["tp"],gt_pred_matches_all = self._process_batch(predn, bbox, cls)
+                # matched = (pred_z*gt_pred_matcher).sum(axis=2) #z predictions matched to ground truth for different iou values, unmatched are 0
+                # matched_kpt = (gt_pred_matcher.unsqueeze(-1)*pred_kpts.squeeze(1)).sum(axis=2) #kpt predictions matched to ground truth for different iou values, unmatched are 0
+                # matched[~gt_pred_matcher.sum(axis=2).type(torch.bool)] = torch.nan #set unmatched detections to nan
+                # matched_kpt[~gt_pred_matcher.sum(axis=2).type(torch.bool)] = torch.nan #set unmatched detections to nan
+
+                pred_xyz = torch.concat([pred_kpts.squeeze(), pred_z[...,None]], dim=-1)
+                gt_xyz = torch.concat([gt_kpts.squeeze(), gt_z[...,None]], dim=-1)
+
+                # Get indices where condition is met
+                gt_pred_matches = gt_pred_matches_all[6]  # choose iou=0.8
+                gt_idx, pred_idx = torch.where(gt_pred_matches)
+                matched_xyz_pairs = torch.stack([gt_xyz[gt_idx], pred_xyz[pred_idx]], dim=1)
+
+                # Identify unmatched indices
+                all_gt = torch.arange(nl, device=self.device)
+                all_pred = torch.arange(npr, device=self.device)
+
+                # Identify unmatched ground truth indices
+                matched_gt = torch.unique(gt_idx)
+                unmatched_gt_mask = ~torch.isin(all_gt, matched_gt)
+                unmatched_gt_xyz = gt_xyz[unmatched_gt_mask]
+                unmatched_gt_xyz_pairs = torch.stack([unmatched_gt_xyz, torch.full_like(unmatched_gt_xyz, float('nan'), device=self.device)], dim=1)
+
+                # Identify unmatched prediction indices
+                matched_pred = torch.unique(pred_idx)
+                unmatched_pred_mask = ~torch.isin(all_pred, matched_pred)
+                unmatched_pred_xyz = pred_xyz[unmatched_pred_mask]
+                unmatched_pred_xyz_pairs = torch.stack([torch.full_like(unmatched_pred_xyz, float('nan'), device=self.device), unmatched_pred_xyz], dim=1)
+
+                stat["xyz_pairs"] = torch.cat([matched_xyz_pairs, unmatched_gt_xyz_pairs, unmatched_pred_xyz_pairs], dim=0)
+
+
+                # stat["z_pairs"] = torch.cat([gt_z.expand((len(matched),-1)).unsqueeze(-1),matched.unsqueeze(-1)],2).transpose(0,1) #paired up z-values
+                # stat["kpt_pairs"] = torch.cat([gt_kpts.transpose(0,1).expand((len(matched),-1,-1)).unsqueeze(-2),matched_kpt.unsqueeze(-2)],-2).transpose(0,1) #paired up kpt-values
                 #stat["kpt_pairs"],stat["z_pairs"] = scale_to_physical(stat["kpt_pairs"],stat["z_pairs"], self.physical_scale, pbatch["ori_shape"])
 
                 #stat["z_pairs"] = [[pair for pair in row if not torch.any(torch.isnan(pair))] for row in z_pairs] #turn into list where nans are excluded
@@ -487,15 +513,15 @@ class ZAxisMetrics(SimpleClass):
         self.box = Metric()
         self.speed = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}
         self.task = "detect"
-        self.z_pairs = None
+        self.xyz_pairs = None
         
 
-    def process(self, tp, conf, pred_cls, target_cls,z_pairs,kpt_pairs):
+    def process(self, tp, conf, pred_cls, target_cls,xyz_pairs):
         """Process predicted results for object detection and update metrics."""
         results = ap_per_class(
             tp,
             conf,
-            pred_cls,
+            pred_cls, 
             target_cls,
             plot=self.plot,
             save_dir=self.save_dir,
@@ -504,13 +530,15 @@ class ZAxisMetrics(SimpleClass):
         )[2:]
         self.all_box_results = {k:v for k,v in zip(["p", "r", "f1", "ap", "unique_classes", "p_curve", "r_curve", "f1_curve", "x", "prec_values"], results)}
         #p, r, f1, ap, unique_classes.astype(int), p_curve, r_curve, f1_curve,...
-        box_results = [r[:,0] if i in (0,1,2,5,6,7) else r for i,r in enumerate(results)] # only single iou value for box results
+        box_results = [r[:,6] if i in (0,1,2,5,6,7) else r for i,r in enumerate(results)] # only single iou value for box results
         self.box.nc = len(self.names)
         self.box.update(box_results)
-        self.num_iou_levels = z_pairs.shape[1]
-        nan_mask = [~np.any(np.isnan(z_pairs[:,i]),axis=1) for i in range(self.num_iou_levels)]
-        self.z_pairs = [z_pairs[:,i][nan_mask[i]].T for i in range(self.num_iou_levels)] #filter out nans
-        self.kpt_pairs = [kpt_pairs[:,i][nan_mask[i]].T for i in range(self.num_iou_levels)] #filter out nans
+        self.num_iou_levels = tp.shape[1]
+        fp = np.isnan(xyz_pairs[:,0,0])
+        fn = np.isnan(xyz_pairs[:,1,0])
+        self.fn = fn
+        self.fp = fp
+        self.xyz_pairs = xyz_pairs #filter out nans
         # self.z_pairs = z_pairs.transpose(1,2,0)
         # self.kpt_pairs = kpt_pairs.transpose(1,2,3,0)
 
@@ -522,8 +550,8 @@ class ZAxisMetrics(SimpleClass):
     def mean_results(self):
         """Calculate mean of detected objects & return precision, recall, mAP50, and mAP50-95."""
         results = self.box.mean_results()
-        results.append(self.z_rms[4])
-        results.append(self.xy_rms[4])
+        results.append(self.z_rms)
+        results.append(self.xy_rms)
 
         return results
 
@@ -539,7 +567,7 @@ class ZAxisMetrics(SimpleClass):
     @property
     def fitness(self):
         """Returns the fitness of box object."""
-        return self.box.fitness()
+        return self.box.f1 * 1/self.z_rms * 1/self.xy_rms
 
     @property
     def ap_class_index(self):
@@ -565,29 +593,26 @@ class ZAxisMetrics(SimpleClass):
     @property
     def z_rms(self):
         """Return Z-Axis root mean square error [um] for 10 different IoU values"""
-        rms = []
-        for z_pairs in self.z_pairs:
-            z_distance = (np.subtract(*z_pairs))
-            rms.append(np.sqrt((z_distance**2).mean()))
-        return rms
+        z_pairs = self.xyz_pairs[:,:,2].T  # get z pairs
+        z_distance = (np.subtract(*z_pairs))
+        return np.sqrt(np.nanmean(z_distance**2))
     
     @property
     def xy_rms(self):
         """Return xy root mean square error [um] for 10 different IoU values"""
         distances = self.xy_distances
-        rms = [np.sqrt((distance**2).mean()) for distance in distances]
+        rms = np.sqrt(np.nanmean(distances**2))
         return rms
     
     @property
     def xy_distances(self):
 
-        distances = []
-        for kpt_pairs in self.kpt_pairs:
-            x_distance = (np.subtract(*kpt_pairs[0]))
-            y_distance = (np.subtract(*kpt_pairs[1]))
-            distance = np.sqrt(x_distance**2+y_distance**2)
+        x_pairs = self.xyz_pairs[:,:,0].T  # get x pairs
+        y_pairs = self.xyz_pairs[:,:,1].T  # get y pairs
+        x_distance = (np.subtract(*x_pairs))
+        y_distance = (np.subtract(*y_pairs))
+        distances = np.sqrt(x_distance**2+y_distance**2)
 
-            distances.append(distance)
         return distances
     
 def ap_per_class(

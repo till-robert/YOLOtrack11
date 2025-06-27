@@ -18,6 +18,9 @@ __all__ = ["dataset", "loss", "model", "val", "predict", "utils", "results", "in
 
 
 import ultralytics
+if(ultralytics.__version__ not in ["8.3.49", "8.3.50", "8.3.51"]):
+    print(f"Warning: YOLOtrack11 was teste on  ultralytics==8.3.49, 8.3.50 and 8.3.51, but found {ultralytics.__version__}. This may cause unexpected behavior.")
+
 from ultralytics.utils import yaml_load, SettingsManager, SETTINGS_FILE
 from pathlib import Path
 from .utils import imread

@@ -88,7 +88,7 @@ class ZAxisResults(Results):
             results.append(result)
 
         return results
-    def plot(self, show_extra_params=None, vmin=None, vmax=None, scale=120):
+    def plot_image(self, show_extra_params=None, vmin=None, vmax=None, scale=120):
         figh,figw = self.orig_img.shape[:2]
         # make a Figure and attach it to a canvas.
         fig = Figure(figsize=(figw//scale,figh//scale), dpi=scale)
@@ -99,6 +99,17 @@ class ZAxisResults(Results):
         ax = Axes(fig, [0., 0., 1.,1.])
         fig.add_axes(ax)
         ax.axis("off")
+        self.plot(ax, show_extra_params=show_extra_params, vmin=vmin, vmax=vmax)
+
+        # Retrieve a view on the renderer buffer
+        ax.set_xlim(0,figw)
+        ax.set_ylim(figh,0)
+        canvas.draw()
+        buf = canvas.buffer_rgba()
+        # convert to a NumPy array
+        return np.asarray(buf)
+    
+    def plot(self, ax: Axes, show_extra_params=None, vmin=None, vmax=None):
 
         boxes = self.boxes.cpu()
         kpts = self.keypoints.cpu().data.numpy()
@@ -125,14 +136,7 @@ class ZAxisResults(Results):
             circle = Circle(kpt.squeeze(),1, facecolor="red",edgecolor="red")
             ax.add_patch(circle)
             ax.text(tx,ty, f"{c*100:.0f}%, z = {z[0]:.2f}um", fontsize="small",bbox=dict(facecolor='white', alpha=0.5,))
-
-        # Retrieve a view on the renderer buffer
-        ax.set_xlim(0,figw)
-        ax.set_ylim(figh,0)
-        canvas.draw()
-        buf = canvas.buffer_rgba()
-        # convert to a NumPy array
-        return np.asarray(buf)
+        return ax
 
 class ZAxis(BaseTensor):
     pass
