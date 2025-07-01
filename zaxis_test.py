@@ -1,58 +1,77 @@
-
-import torch
 import sys
-import os
-import PIL.Image
 import numpy as np
-from ultralytics.utils import ops
+import os
 import matplotlib.pyplot as plt
-
-def postprocess(preds, img, orig_imgs):
-    """Post-processes predictions and returns a list of Results objects."""
-    preds = ops.non_max_suppression(
-        preds,
-        conf_thres=0.7,
-        iou_thres=0.7,
-        nc=1,
-    )
-
-    if not isinstance(orig_imgs, list):  # input images are a torch.Tensor, not a list
-        orig_imgs = ops.convert_torch2numpy_batch(orig_imgs)
-
-    results = []
-    for pred, orig_img, img_path in zip(preds, orig_imgs, (image,)):
-        pred[:, :4] = scale_boxes(img.shape[2:], pred[:, :4], orig_img.shape)
-        # nkpt = self.model.kpt_shape[0]
-        npar = 2
-        pred_kpts = pred[:, 6+npar:].view(len(pred), 1,2) if len(pred) else pred[:, 6+npar:]
-        pred_kpts = scale_coords(img.shape[2:], pred_kpts, orig_img.shape)
-        results.append(Results(orig_img, path=img_path, names={0:"s"}, extra_param_names=["z","i"], boxes=pred[:, :6], zaxis=pred[:, 6:6+npar], keypoints=pred_kpts))
-    return results
-
-def predict(x, model):
-    y = []  # outputs
-    for m in model.model:
-        if m.f != -1:  # if not from previous layer
-                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
-        x = m(x)  # run
-        y.append(x)  # save output
-    return x
-
-sys.path.append("../..")
 sys.path.append("..")
-from YOLOtrack11.utils import scale_boxes, scale_coords
-from YOLOtrack11.results import ZAxisResults as Results
 from YOLOtrack11 import YOLOtrack11
-
-dataset_path = "datasets/Dataset_spots/images/test_snr5.0"
-imgsz=640,540
+# model = YOLOtrack11("yolo11n-yundon.pt")
+# print(model.model.model)
+print("loaded")
+dataset_path = "datasets/Dataset_yundon/images/test"
+# dataset_path = "../ultralytics/data_gen/Dataset_hard/images/val"
+imgsz=1024,824
+# imgsz=640,540
 test_images = os.listdir(dataset_path)
 random_image = lambda: dataset_path+"/"+test_images[np.random.randint(0,len(test_images))]
-image = random_image()
-img = np.array(PIL.Image.open(image))
-model = torch.load("notebooks/yolo11n_spots_15-20.pt")
-torch_img = torch.Tensor(img/2**16).unsqueeze(0).unsqueeze(0).half().to("cuda:0")
-m = model["model"].to("cuda:0")
-out = predict(torch_img,m)#predict(torch_img,m)
-plt.imshow(postprocess(out, torch_img, torch_img)[0].plot())
-plt.savefig("tmp.png")
+
+from itertools import repeat
+from matplotlib.patches import Rectangle, Circle
+import PIL.Image
+def plot_gt(path,ax,imgsz=[512,512],vmin=1.95e4,vmax=2.05e4):
+    data=np.atleast_2d(np.loadtxt(path.replace("images", "labels").replace("jpg","txt").replace("tif","txt"))).T
+    # print(data)
+    if(len(data)==0):
+         return plot_result(ax,path, np.empty(0),np.empty((0,4)),np.empty(0),np.empty((0,0)),vmin=vmin,vmax=vmax)
+    cls = data[0]
+    bboxes = data[1:5].T*(imgsz*2)
+    bboxes[:,2:]=bboxes[:,2:]
+    z = data[5]
+    kpts = data[6:].T*imgsz
+    # print(bboxes)
+    
+    return plot_result(ax,path, cls,bboxes,z,kpts, vmin=vmin,vmax=vmax)
+def plot_result(ax,img,cls,bboxes=repeat(None),z=None,kpts=None, conf=None,vmin=1.95e4,vmax=2.05e4):
+    is_conf = conf is not None
+    if not is_conf:
+         conf = np.zeros_like(cls)
+    if isinstance(img, PIL.Image.Image):
+        pass
+    elif(type(img) == str):
+        img = PIL.Image.open(img)
+    print(vmin,vmax)
+    ax.imshow(img,cmap="grey",vmin=vmin,vmax=vmax)
+    ax.axis("off")
+    for bbox,z_value,kpt,c in zip(bboxes,z, kpts,conf):
+        if(bbox is not None):
+            x,y,w,h = bbox
+            rect = Rectangle((x-0.5*w,y-0.5*h),h,w, linewidth=1, edgecolor="yellow", facecolor='none')
+            tx,ty = rect.get_xy()
+            ax.add_patch(rect)
+            tx+=6
+            ty-=12
+        else:
+            tx,ty = kpt
+            ty-=40
+            tx-=50
+        circle = Circle(kpt,1, facecolor="red",edgecolor="red")
+        ax.add_patch(circle)
+        ax.text(tx,ty,f"z={z_value:.3f}" + (f", {c*100:.0f}%" if is_conf else ""),fontsize="small",bbox=dict(facecolor='white', alpha=0.5,))
+
+    return bboxes,z
+
+img = "datasets/Zstack_DownSampled_BGCorrected_TrackingData/Image Set 8 - 250616"
+finetuned_model = YOLOtrack11("notebooks/yolo11n-yundon_pretrained.pt")
+res = finetuned_model.predict(img, conf=0.5, background=2e4, show=True)
+# fig=plt.figure(2)
+# plt.clf()
+# fig.set_figheight(5)
+# fig.set_figwidth(10)
+# plt.subplot(121)
+# plt.title("prediction")
+# res[0].plot(plt.gca(),vmin=1.95e4, vmax=2.05e4)
+# plt.axis("off")
+# plt.subplot(122)
+# plt.title("ground truth")
+# plot_gt(img, plt.gca(), (1024,824))
+# # plt.axis("on")
+# plt.show()

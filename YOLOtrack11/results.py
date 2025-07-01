@@ -88,7 +88,24 @@ class ZAxisResults(Results):
             results.append(result)
 
         return results
-    def plot_image(self, show_extra_params=None, vmin=None, vmax=None, scale=120):
+    def plot(self, show_extra_params=None, vmin=1.95e4, vmax=2.05e4, scale=120,
+        conf=True,
+        line_width=None,
+        font_size=None,
+        font="Arial.ttf",
+        pil=False,
+        img=None,
+        im_gpu=None,
+        kpt_radius=5,
+        kpt_line=True,
+        labels=True,
+        boxes=True,
+        masks=True,
+        probs=True,
+        show=False,
+        save=False,
+        filename=None,
+        color_mode="class",):
         figh,figw = self.orig_img.shape[:2]
         # make a Figure and attach it to a canvas.
         fig = Figure(figsize=(figw//scale,figh//scale), dpi=scale)
@@ -99,7 +116,7 @@ class ZAxisResults(Results):
         ax = Axes(fig, [0., 0., 1.,1.])
         fig.add_axes(ax)
         ax.axis("off")
-        self.plot(ax, show_extra_params=show_extra_params, vmin=vmin, vmax=vmax)
+        self.ax_plot(ax, show_extra_params=show_extra_params, vmin=vmin, vmax=vmax)
 
         # Retrieve a view on the renderer buffer
         ax.set_xlim(0,figw)
@@ -109,7 +126,7 @@ class ZAxisResults(Results):
         # convert to a NumPy array
         return np.asarray(buf)
     
-    def plot(self, ax: Axes, show_extra_params=None, vmin=None, vmax=None):
+    def ax_plot(self, ax: Axes, show_extra_params=None, vmin=None, vmax=None):
 
         boxes = self.boxes.cpu()
         kpts = self.keypoints.cpu().data.numpy()

@@ -3,6 +3,7 @@ import math
 import cv2
 import numpy as np
 import torch
+from PIL import Image
 
 
 def imread(filename: str, flags: int = cv2.IMREAD_UNCHANGED):
@@ -82,3 +83,19 @@ def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None, normalize=False
         coords[..., 0] /= img0_shape[1]  # width
         coords[..., 1] /= img0_shape[0]  # height
     return coords
+
+def get_n_frames(tif_path):
+    """
+    Get the number of frames in a TIFF file.
+
+    Args:
+        tif_path (str): Path to the TIFF file.
+
+    Returns:
+        int: Number of frames in the TIFF file.
+    """
+    try:
+        with Image.open(tif_path) as img:
+            return img.n_frames
+    except Exception as e:
+        raise ValueError(f"Could not read TIFF file {tif_path}: {e}")

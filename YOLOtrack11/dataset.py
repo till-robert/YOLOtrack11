@@ -5,27 +5,29 @@ import cv2
 from itertools import repeat
 from ultralytics.utils import LOGGER, instance
 from ultralytics.utils.ops import segments2boxes,resample_segments
-
+import glob
 from ultralytics.data.loaders import (
-    LoadImagesAndVideos,
+    LoadImagesAndVideos as LoadImagesAndVideos_ultralytics,
     LoadPilAndNumpy,
     LoadScreenshots,
     LoadStreams,
-    LoadTensor,
+    LoadTensor as LoadTensor_ultralytics,
     SourceTypes,
 )
 from ultralytics.data.build import check_source
 from ultralytics.data.dataset import YOLODataset,DATASET_CACHE_VERSION
-from ultralytics.data.utils import exif_size,IMG_FORMATS,FORMATS_HELP_MSG,ImageOps,get_hash,HELP_URL,save_dataset_cache_file
+from ultralytics.data.utils import exif_size,IMG_FORMATS,VID_FORMATS,FORMATS_HELP_MSG,ImageOps,get_hash,HELP_URL,save_dataset_cache_file
 import numpy as np
 from pathlib import Path
 from multiprocessing.pool import ThreadPool
 from ultralytics.utils import LOCAL_RANK, NUM_THREADS, TQDM, colorstr
 from PIL import Image
 from .augment import v8_transforms, Instances, Compose, LetterBox, Format
+from .utils import get_n_frames, imread
+from ultralytics.utils.checks import check_requirements
 
 
-class LoadTensor16bit(LoadTensor):    
+class LoadTensor(LoadTensor_ultralytics):    
     @staticmethod
     def _single_check(im, stride=32):
         """Validates and formats a single image tensor, ensuring correct shape and normalization."""
@@ -41,14 +43,170 @@ class LoadTensor16bit(LoadTensor):
         if im.shape[2] % stride or im.shape[3] % stride:
             raise ValueError(s)
         if im.max() > 1.0 + torch.finfo(im.dtype).eps:  # torch.float32 eps is 1.2e-07
-            LOGGER.warning(
-                f"WARNING ⚠️ torch.Tensor inputs should be normalized 0.0-1.0 but max value is {im.max()}. "
-                f"Dividing input by 255."
-            )
+            # normalization is done in the preprocessing step (e.g. in val.py)
             im = im.float()
 
         return im
+
+class LoadImagesAndVideos(LoadImagesAndVideos_ultralytics):
+    """Dataloader for images and videos, supporting various input formats.
+    This class extends the LoadImagesAndVideos from ultralytics.data.loaders to support multi-frame TIFF files."""
+
+    def __init__(self, path, batch=1, vid_stride=1):
+        """Initialize dataloader for images and videos, supporting various input formats."""
+        parent = None
+        if isinstance(path, str) and Path(path).suffix == ".txt":  # *.txt file with img/vid/dir on each line
+            parent = Path(path).parent
+            path = Path(path).read_text().splitlines()  # list of sources
+        files = []
+        for p in sorted(path) if isinstance(path, (list, tuple)) else [path]:
+            a = str(Path(p).absolute())  # do not use .resolve() https://github.com/ultralytics/ultralytics/issues/2912
+            if "*" in a:
+                files.extend(sorted(glob.glob(a, recursive=True)))  # glob
+            elif os.path.isdir(a):
+                files.extend(sorted(glob.glob(os.path.join(a, "*.*"))))  # dir
+            elif os.path.isfile(a):
+                files.append(a)  # files (absolute or relative to CWD)
+            elif parent and (parent / p).is_file():
+                files.append(str((parent / p).absolute()))  # files (relative to *.txt file parent)
+            else:
+                raise FileNotFoundError(f"{p} does not exist")
+
+        # Define files as images or videos
+        images, videos, multitifs = [], [], []
+        for f in files:
+            suffix = f.split(".")[-1].lower()  # Get file extension without the dot and lowercase
+            if suffix in {"tif", "tiff"} and get_n_frames(f) > 1:  # TIFF files
+                multitifs.append(f)  # treat multi-frame TIFF as video
+            elif suffix in IMG_FORMATS:
+                images.append(f)
+            elif suffix in VID_FORMATS:
+                videos.append(f)
+        ni, nv, nt = len(images), len(videos), len(multitifs)
+
+        self.files = images + videos + multitifs
+        self.nf = ni + nv + nt  # number of files
+        self.ni = ni  # number of images
+        self.video_flag = [False] * ni + [True] * nv + [False] * nt  # video flag for each file
+        self.tif_flag = [False] * ni + [False] * nv + [True] * nt  # tif flag for each file
+        self.mode = "video" if ni == 0 else "image"  # default to video if no images
+        self.vid_stride = vid_stride  # video frame-rate stride
+        self.bs = batch
+        if any(videos):
+            self._new_video(videos[0])  # new video
+        if any(multitifs):
+            self._new_multitif(multitifs[0])
+        else:
+            self.cap = None
+        if self.nf == 0:
+            raise FileNotFoundError(f"No images or videos found in {p}. {FORMATS_HELP_MSG}")
     
+    def _new_multitif(self, path):
+        """Creates a new video capture object for the given path and initializes video-related attributes."""
+        self.frame = 0
+        self.multitif = Image.open(path)
+        self.fps = 25
+        self.frames = int(self.multitif.n_frames / self.vid_stride)
+    
+    def __next__(self):
+        """Returns the next batch of images or video frames with their paths and metadata."""
+        paths, imgs, info = [], [], []
+        while len(imgs) < self.bs:
+            if self.count >= self.nf:  # end of file list
+                if imgs:
+                    return paths, imgs, info  # return last partial batch
+                else:
+                    raise StopIteration
+
+            path = self.files[self.count]
+            if self.video_flag[self.count]:
+                self.mode = "video"
+                if not self.cap or not self.cap.isOpened():
+                    self._new_video(path)
+
+                success = False
+                for _ in range(self.vid_stride):
+                    success = self.cap.grab()
+                    if not success:
+                        break  # end of video or failure
+
+                if success:
+                    success, im0 = self.cap.retrieve()
+                    if success:
+                        self.frame += 1
+                        paths.append(path)
+                        imgs.append(im0)
+                        info.append(f"video {self.count + 1}/{self.nf} (frame {self.frame}/{self.frames}) {path}: ")
+                        if self.frame == self.frames:  # end of video
+                            self.count += 1
+                            self.cap.release()
+                else:
+                    # Move to the next file if the current video ended or failed to open
+                    self.count += 1
+                    if self.cap:
+                        self.cap.release()
+                    if self.count < self.nf:
+                        self._new_video(self.files[self.count])
+            if self.tif_flag[self.count]:
+                self.mode = "video"
+                if not self.multitif:
+                    self._new_multitif(path)
+
+                success = False
+                for _ in range(self.vid_stride):
+                    try:
+                        self.multitif.seek(self.frame * self.vid_stride)  # seek to the next frame
+                        success = True
+                    except EOFError:
+                        success = False
+                    if not success:
+                        break  # end of video or failure
+
+                if success:
+                    im0 = np.asarray(self.multitif)
+                    self.frame += 1
+                    paths.append(path)
+                    imgs.append(im0)
+                    info.append(f"video {self.count + 1}/{self.nf} (frame {self.frame}/{self.frames}) {path}: ")
+                    if self.frame == self.frames:  # end of video
+                        self.count += 1
+                        self.multitif.close()
+                        self.multitif = None
+                else:
+                    # Move to the next file if the current video ended or failed to open
+                    self.count += 1
+                    if self.multitif:
+                        self.multitif.close()
+                        self.multitif = None
+                    # Check if there are more files to process
+                    if self.count < self.nf:
+                        self._new_multitif(self.files[self.count])
+            else:
+                # Handle image files (including HEIC)
+                self.mode = "image"
+                if path.split(".")[-1].lower() == "heic":
+                    # Load HEIC image using Pillow with pillow-heif
+                    check_requirements("pillow-heif")
+
+                    from pillow_heif import register_heif_opener
+
+                    register_heif_opener()  # Register HEIF opener with Pillow
+                    with Image.open(path) as img:
+                        im0 = cv2.cvtColor(np.asarray(img), cv2.COLOR_RGB2BGR)  # convert image to BGR nparray
+                else:
+                    im0 = imread(path)  # BGR
+                if im0 is None:
+                    LOGGER.warning(f"WARNING ⚠️ Image Read Error {path}")
+                else:
+                    paths.append(path)
+                    imgs.append(im0)
+                    info.append(f"image {self.count + 1}/{self.nf} {path}: ")
+                self.count += 1  # move to the next file
+                if self.count >= self.ni:  # end of image list
+                    break
+
+        return paths, imgs, info
+
 
 def load_inference_source(source=None, batch=1, vid_stride=1, buffer=False):
     """
@@ -68,7 +226,7 @@ def load_inference_source(source=None, batch=1, vid_stride=1, buffer=False):
 
     # Dataloader
     if tensor:
-        dataset = LoadTensor16bit(source)
+        dataset = LoadTensor(source)
     elif in_memory:
         dataset = source
     elif stream:
